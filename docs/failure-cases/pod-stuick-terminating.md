@@ -128,10 +128,11 @@ minio/6   waiting   idle   10.1.5.115  9000-9001/TCP  Waiting for leadership
 
 ## Trouble shooting with agent
 
-### Available MCP servers
+### Available UTCP Tools
 
-- https://github.com/containers/kubernetes-mcp-server
-- https://github.com/grafana/mcp-grafana
+Tools are generated dynamically from OpenAPI specifications:
+- Kubernetes: `search_kubernetes_operations`, `call_kubernetes_operation`
+- Grafana: `search_grafana_operations`, `call_grafana_operation`
 
 prompt:
 
@@ -143,7 +144,7 @@ Please follow these steps:
 2. Check the logs of all the kubernetes component if needed
 
 Important notes about logs:
-- The kubernetes component logs CANNOT be reached by the mcp-k8s tools because this is Canonical Kubernetes
+- The kubernetes component logs CANNOT be reached by the UTCP kubernetes tools because this is Canonical Kubernetes
 - Service logs are in snap service logs and should be queried from Loki
 
 ## How to query the canonical kubernets service logs

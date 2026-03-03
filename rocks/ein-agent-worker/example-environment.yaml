@@ -1,21 +1,39 @@
 env:
-  # MCP Server Configuration
-  - name: MCP_SERVERS
-    value: kubernetes,grafana
-  - name: MCP_KUBERNETES_URL
-    value: http://kubernetes-mcp-server.kubernetes-mcp-server.svc.cluster.local:8080/mcp
-  - name: MCP_KUBERNETES_ENABLED
-    value: "true"
-  - name: MCP_KUBERNETES_TRANSPORT
-    value: http
+  # UTCP Service Configuration
+  # Services are configured via OpenAPI spec endpoints
+  - name: UTCP_SERVICES
+    value: kubernetes,grafana,ceph
 
-  # Grafana MCP Server Configuration
-  - name: MCP_GRAFANA_URL
-    value: http://my-release-grafana-mcp.mcp-grafana.svc.cluster.local:8000/sse
-  - name: MCP_GRAFANA_ENABLED
+  # Kubernetes UTCP Configuration
+  # Uses kubectl proxy or direct API server access
+  - name: UTCP_KUBERNETES_OPENAPI_URL
+    value: http://localhost:8080/openapi/v2
+  - name: UTCP_KUBERNETES_AUTH_TYPE
+    value: proxy
+  - name: UTCP_KUBERNETES_ENABLED
     value: "true"
-  - name: MCP_GRAFANA_TRANSPORT
-    value: sse
+  - name: UTCP_KUBERNETES_VERSION
+    value: "1.35"
+
+  # Grafana UTCP Configuration
+  - name: UTCP_GRAFANA_OPENAPI_URL
+    value: http://grafana.cos.svc.cluster.local:3000/api/swagger.json
+  - name: UTCP_GRAFANA_AUTH_TYPE
+    value: api_key
+  - name: UTCP_GRAFANA_ENABLED
+    value: "true"
+  - name: UTCP_GRAFANA_VERSION
+    value: "12"
+
+  # Ceph UTCP Configuration
+  - name: UTCP_CEPH_OPENAPI_URL
+    value: https://ceph-mgr.ceph.svc.cluster.local:8443/api/openapi.json
+  - name: UTCP_CEPH_AUTH_TYPE
+    value: jwt
+  - name: UTCP_CEPH_ENABLED
+    value: "true"
+  - name: UTCP_CEPH_VERSION
+    value: tentacle
 
   # Agent's model
   - name: EIN_AGENT_MODEL

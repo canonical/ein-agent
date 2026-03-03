@@ -13,7 +13,7 @@ The workflow enforces a strict **"Ask-First"** protocol for delegation. This pre
 1.  **Proposal**: The Orchestrator (Investigation Agent) analyzes the user's request or alert data. If it identifies a need for domain expertise (e.g., a Ceph cluster error), it **proposes** a specialist: *"I see disk errors. Shall I consult the Storage Specialist?"*
 2.  **Confirmation**: The workflow suspends execution, waiting for an explicit signal from the user via the CLI.
 3.  **Delegation (Handoff)**: Once the user confirms (e.g., types "Yes"), the Orchestrator executes a **Handoff**. This transfers execution control to the specific Domain Specialist.
-4.  **Investigation & Return**: The specialist performs its technical investigation using MCP tools and then **hands off back** to the Orchestrator. The Orchestrator then synthesizes the findings for the user.
+4.  **Investigation & Return**: The specialist performs its technical investigation using UTCP tools and then **hands off back** to the Orchestrator. The Orchestrator then synthesizes the findings for the user.
 
 This loop ensures that the user remains the ultimate decision-maker regarding the scope and depth of the investigation.
 
@@ -23,7 +23,7 @@ The swarm is composed of two distinct categories of agents, each with specific r
 
 ### 1. The Orchestrator (Investigation Agent)
 *   **Role**: Project Manager & User Interface.
-*   **Access**: Has **NO** direct access to infrastructure tools (MCP).
+*   **Access**: Has **NO** direct access to infrastructure tools (UTCP).
 *   **Responsibilities**:
     *   Maintains the conversation history and context.
     *   Synthesizes raw technical data into human-readable summaries.
@@ -32,7 +32,7 @@ The swarm is composed of two distinct categories of agents, each with specific r
 
 ### 2. Domain Specialists
 *   **Role**: Technical Subject Matter Experts (SMEs).
-*   **Access**: Have **exclusive** access to domain-specific MCP servers.
+*   **Access**: Have **exclusive** access to domain-specific UTCP tools.
 *   **Responsibilities**:
     *   **Compute Specialist**: Investigates Kubernetes nodes, pods, and container runtimes.
     *   **Storage Specialist**: Investigates Ceph clusters, OSDs, PVCs, and block devices.

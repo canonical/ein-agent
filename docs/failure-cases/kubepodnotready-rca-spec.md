@@ -60,11 +60,11 @@ The AI agent should investigate and determine which of the following three prima
 
 ---
 
-## Available MCP Tools
+## Available UTCP Tools
 
-1. Kubernetes MCP Server: https://github.com/containers/kubernetes-mcp-server
-
-2. Grafana MCP Server: https://github.com/grafana/mcp-grafana
+Tools are generated dynamically from OpenAPI specifications:
+- **Kubernetes**: `search_kubernetes_operations`, `get_kubernetes_operation_details`, `call_kubernetes_operation`
+- **Grafana**: `search_grafana_operations`, `get_grafana_operation_details`, `call_grafana_operation`
 
 ---
 
@@ -79,7 +79,7 @@ Namespace: <namespace>
 Cluster: <cluster-name>
 Duration: Pod has been in non-ready state for 15+ minutes
 
-Your task is to perform root cause analysis for this alert using the available MCP tools.
+Your task is to perform root cause analysis for this alert using the available UTCP tools.
 
 Follow this investigation workflow:
 
@@ -263,5 +263,5 @@ kubectl delete pod test-insufficient-cpu test-image-pull-failure test-container-
 ## References
 
 - Alert Rule Definition: https://raw.githubusercontent.com/prometheus-operator/kube-prometheus/v0.15.0/manifests/kubernetesControlPlane-prometheusRule.yaml
-- Kubernetes MCP: https://github.com/containers/kubernetes-mcp-server
-- Grafana MCP: https://github.com/grafana/mcp-grafana
+- Kubernetes OpenAPI: https://kubernetes.io/docs/concepts/overview/kubernetes-api/
+- Grafana HTTP API: https://grafana.com/docs/grafana/latest/developers/http_api/

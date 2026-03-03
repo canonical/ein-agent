@@ -10,7 +10,7 @@ It uses a **Router-Assisted** pattern where a deterministic "Router" guides the 
 
 ## Architecture
 
-The workflow follows a hierarchical structure designed for extensibility. New specialists can be added simply by registering their Model Context Protocol (MCP) server; the orchestration logic remains unchanged.
+The workflow follows a hierarchical structure designed for extensibility. New specialists can be added by configuring UTCP (Universal Tool Calling Protocol) services; the orchestration logic remains unchanged.
 
 ```text
                           +-------------------------+
@@ -68,8 +68,8 @@ The workflow follows a hierarchical structure designed for extensibility. New sp
 
 ### 4. Domain Specialists (The Experts)
 *   **Role:** Subject Matter Experts.
-*   **Responsibility:** Use Model Context Protocol (MCP) tools to query the actual infrastructure.
-*   **Extensibility:** This layer is dynamic. The workflow automatically creates a specialist agent for every enabled MCP server in the configuration.
+*   **Responsibility:** Use UTCP tools (generated from OpenAPI specs) to query the actual infrastructure.
+*   **Extensibility:** This layer is dynamic. The workflow automatically creates a specialist agent for every enabled UTCP service in the configuration.
 *   **Current Implementations:**
     *   **KubernetesSpecialist:** Checks Pod logs, events, and resource status.
     *   **CephSpecialist:** Checks OSD status, PG health, and storage capacity.
@@ -85,7 +85,7 @@ The investigation follows a strict sequence of events as numbered in the archite
 3.  **Ask Router:** The `SingleAlertLeader` begins its investigation by sending the alert description to the `RouterAgent`.
 4.  **Plan:** The `RouterAgent` performs a deterministic keyword analysis and returns a list of specialists that MUST be consulted (e.g., "Consult KubernetesSpecialist and CephSpecialist").
 5.  **Call Specialist (Loop):** The `SingleAlertLeader` calls the first specialist on the list.
-6.  **Return Findings (Loop):** The Specialist performs the investigation using MCP tools and returns its findings to the `SingleAlertLeader`. 
+6.  **Return Findings (Loop):** The Specialist performs the investigation using UTCP tools and returns its findings to the `SingleAlertLeader`. 
     *Steps 5 and 6 repeat sequentially for every specialist suggested by the Router.*
 7.  **Single RCA:** Once all specialists have been consulted, the `SingleAlertLeader` synthesizes the evidence and sends a Root Cause Analysis (RCA) report back to the `MultiAlertLeader`.
 8.  **Final Report:** After receiving RCA reports for all alerts, the `MultiAlertLeader` correlates the findings into a final Incident Report and delivers it to the User.

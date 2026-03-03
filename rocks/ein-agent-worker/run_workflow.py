@@ -12,11 +12,11 @@ async def main():
     workflow_name = "SingleAlertInvestigationWorkflow"
     workflow_id = "single-alert-investigation-id"
 
-    enabled_server_names = ["kubernetes", "grafana"]
+    enabled_services = ["kubernetes", "grafana"]
 
     prompt = """ALERT: KubePodNotReady1M
 
-Your task is to perform root cause analysis for all firing KubePodNotReady1M alerts using the available MCP tools.
+Your task is to perform root cause analysis for all firing KubePodNotReady1M alerts using the available UTCP tools.
 
 Follow this investigation workflow:
 
@@ -83,7 +83,7 @@ Provide a summary at the end with the total number of affected pods and common p
         "please tell me a joke",
         id=workflow_id,
         task_queue="ein-agent-queue",
-        memo={"mcp_servers": enabled_server_names},
+        memo={"utcp_services": enabled_services},
     )
 
 

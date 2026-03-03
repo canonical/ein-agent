@@ -33,7 +33,7 @@ Ein Agent is a distributed AI-powered workflow orchestration system designed to 
        +---------------+             |              | List/                                     |
        | Output Target | < - (6) - - +              | Call                                      |
        +---------------+  Send Output|              v                                           |
-                                     |      [ MCP Servers ]                                     |
+                                     |      [ UTCP Tools ]                                      |
                                      |              |                                           |
                                      +--------------|-------------------------------------------+
                                                     |
@@ -48,7 +48,7 @@ Ein Agent is a distributed AI-powered workflow orchestration system designed to 
 ```
 
 
-The system uses Temporal workflows to ensure reliable, distributed processing with AI-powered analysis. When a workflow is triggered via the CLI, the AI agent communicates with various MCP (Model Context Protocol) services to gather information, diagnose issues, and perform troubleshooting actions on the infrastructure.
+The system uses Temporal workflows to ensure reliable, distributed processing with AI-powered analysis. When a workflow is triggered via the CLI, the AI agent uses UTCP (Universal Tool Calling Protocol) tools generated from OpenAPI specifications to gather information, diagnose issues, and perform troubleshooting actions on the infrastructure.
 
 ## Components
 
