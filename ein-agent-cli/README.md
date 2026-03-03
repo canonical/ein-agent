@@ -77,16 +77,6 @@ uv run python -m ein_agent_cli \
     --temporal-queue ein-agent-queue
 ```
 
-Configure MCP servers to use:
-
-```bash
-# Specify MCP servers (default: kubernetes, grafana)
-uv run python -m ein_agent_cli \
-    -m kubernetes \
-    -m grafana \
-    -m prometheus
-```
-
 ### Complete Example
 
 ```bash
@@ -99,8 +89,6 @@ uv run python -m ein_agent_cli \
     -i KubePodNotReady \
     -i KubePodCrashLooping \
     -b Watchdog \
-    -m kubernetes \
-    -m grafana \
     --show-labels
 
 # Automated workflow trigger (no confirmation prompt)

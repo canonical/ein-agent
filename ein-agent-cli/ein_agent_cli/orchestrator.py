@@ -111,12 +111,10 @@ async def run_incident_workflow(config: WorkflowConfig) -> None:
         if config.dry_run:
             console.print_warning("DRY RUN - Not triggering workflow")
             console.print_dim(f"Would trigger workflow with {len(filtered_alerts)} alerts")
-            console.print_dim(f"MCP servers: {config.mcp_servers}")
             console.print_dim(f"Temporal: {config.temporal.host}/{config.temporal.namespace}/{config.temporal.queue}")
             return
 
         # Ask for confirmation before triggering workflow (unless --no-prompt is set)
-        console.print_dim(f"MCP servers: {config.mcp_servers}")
         console.print_dim(f"Temporal: {config.temporal.host}/{config.temporal.namespace}/{config.temporal.queue}")
         console.print_newline()
 
@@ -134,7 +132,6 @@ async def run_incident_workflow(config: WorkflowConfig) -> None:
         workflow_params = TemporalWorkflowParams(
             alerts=filtered_alerts,
             config=config.temporal,
-            mcp_servers=config.mcp_servers,
             workflow_id=config.workflow_id,
         )
         wf_id = await trigger_incident_workflow(workflow_params)

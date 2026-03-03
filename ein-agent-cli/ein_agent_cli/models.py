@@ -190,10 +190,6 @@ class WorkflowConfig(BaseModel):
         default="http://localhost:9093",
         description="Alertmanager URL"
     )
-    mcp_servers: List[str] = Field(
-        default=["kubernetes", "grafana"],
-        description="MCP server names to use"
-    )
     workflow_id: Optional[str] = Field(
         default=None,
         description="Custom workflow ID"
@@ -232,7 +228,6 @@ class WorkflowConfig(BaseModel):
         cls,
         alertmanager_url: str,
         include: Optional[List[str]],
-        mcp_servers: List[str],
         temporal_host: Optional[str],
         temporal_namespace: Optional[str],
         temporal_queue: Optional[str],
@@ -248,7 +243,6 @@ class WorkflowConfig(BaseModel):
         Args:
             alertmanager_url: Alertmanager URL
             include: Alert names or fingerprints to include (whitelist)
-            mcp_servers: MCP server names to use
             temporal_host: Temporal server host:port
             temporal_namespace: Temporal namespace
             temporal_queue: Temporal task queue
@@ -278,7 +272,6 @@ class WorkflowConfig(BaseModel):
 
         return cls(
             alertmanager_url=alertmanager_url,
-            mcp_servers=mcp_servers,
             workflow_id=workflow_id,
             dry_run=dry_run,
             show_labels=show_labels,
@@ -338,9 +331,6 @@ class TemporalWorkflowParams(BaseModel):
     )
     config: TemporalConfig = Field(
         description="Temporal configuration"
-    )
-    mcp_servers: List[str] = Field(
-        description="List of MCP server names"
     )
     workflow_id: Optional[str] = Field(
         default=None,

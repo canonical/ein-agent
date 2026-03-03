@@ -76,13 +76,7 @@ def run_incident_workflow(
         "-i",
         help="Alert names or fingerprints to include (whitelist). If not specified, all alerts are included.",
     ),
-    mcp_servers: List[str] = typer.Option(
-        ["kubernetes", "grafana"],
-        "--mcp-server",
-        "-m",
-        help="MCP server names to use",
-    ),
-    temporal_host: str = typer.Option(
+temporal_host: str = typer.Option(
         None,
         "--temporal-host",
         help="Temporal server host:port",
@@ -172,7 +166,6 @@ def run_incident_workflow(
     config = WorkflowConfig.from_cli_args(
         alertmanager_url=alertmanager_url,
         include=include,
-        mcp_servers=mcp_servers,
         temporal_host=temporal_host,
         temporal_namespace=temporal_namespace,
         temporal_queue=temporal_queue,
@@ -227,7 +220,7 @@ def investigate(
     The agent has access to:
     - Alertmanager for fetching alerts
     - Domain specialists (Compute, Storage, Network) for deep technical analysis
-    - MCP tools (Kubernetes, Grafana, etc.) for infrastructure queries
+    - UTCP tools (Kubernetes, Grafana, Ceph) for infrastructure queries
 
     Examples:
 
