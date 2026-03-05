@@ -4,14 +4,18 @@ Configuration Format:
     UTCP_SERVICES: Comma-separated list of service names (e.g., "kubernetes,grafana,ceph")
     UTCP_{SERVICE}_OPENAPI_URL: URL to the OpenAPI spec (required)
     UTCP_{SERVICE}_AUTH_TYPE: Authentication type - 'proxy', 'bearer', 'api_key', 'jwt' (default: proxy)
+    UTCP_{SERVICE}_TOKEN: Bearer token for direct API access (required when AUTH_TYPE=bearer)
+    UTCP_{SERVICE}_INSECURE: Skip TLS verification (default: false)
     UTCP_{SERVICE}_ENABLED: Enable/disable the service (default: true)
     UTCP_{SERVICE}_VERSION: Version of the spec to use (default: latest supported)
 
 Example:
     export UTCP_SERVICES="kubernetes,grafana,ceph"
-    export UTCP_KUBERNETES_OPENAPI_URL="http://localhost:8080/openapi/v2"
-    export UTCP_KUBERNETES_AUTH_TYPE="proxy"
-    export UTCP_KUBERNETES_VERSION="1.30"
+    export UTCP_KUBERNETES_OPENAPI_URL="https://10.0.0.1:6443/openapi/v2"
+    export UTCP_KUBERNETES_AUTH_TYPE="bearer"
+    export UTCP_KUBERNETES_TOKEN="eyJhbGciOiJSUzI1NiIs..."
+    export UTCP_KUBERNETES_INSECURE="true"
+    export UTCP_KUBERNETES_VERSION="1.35"
     export UTCP_GRAFANA_OPENAPI_URL="https://grafana.example.com/api/swagger.json"
     export UTCP_GRAFANA_AUTH_TYPE="api_key"
 """
@@ -84,16 +88,21 @@ class UTCPServiceConfig:
         name: Unique name of the service (e.g., 'kubernetes', 'grafana')
         openapi_url: URL to the OpenAPI specification endpoint (for runtime calls)
         auth_type: Authentication type ('proxy', 'bearer', 'api_key', 'jwt')
+        token: Bearer token for direct API access (required when auth_type='bearer')
+        insecure: Skip TLS verification for self-signed certificates
         enabled: Whether the service is enabled
         version: Version of the OpenAPI spec to use (e.g., '1.30', 'reef', '11')
+        dynamic: If True, generate tools at runtime from OpenAPI URL
     """
 
     name: str
     openapi_url: str
     auth_type: str = "proxy"
+    token: str = ""
+    insecure: bool = False
     enabled: bool = True
     version: str = ""
-    dynamic: bool = False  # If True, generate tools at runtime from OpenAPI URL
+    dynamic: bool = False
 
 
 @dataclass
@@ -173,6 +182,23 @@ class UTCPConfig:
             )
             return None
 
+        # Get token (required for bearer auth)
+        token_key = f"UTCP_{service_key}_TOKEN"
+        token = os.getenv(token_key, "")
+
+        # Validate token is provided for bearer auth
+        if auth_type == "bearer" and not token:
+            logger.error(
+                "UTCP service '%s' has auth_type='bearer' but %s is not set",
+                service_name,
+                token_key,
+            )
+            return None
+
+        # Get insecure flag (skip TLS verification)
+        insecure_key = f"UTCP_{service_key}_INSECURE"
+        insecure = os.getenv(insecure_key, "false").lower() == "true"
+
         # Get version (for loading the correct spec file)
         version_key = f"UTCP_{service_key}_VERSION"
         version = os.getenv(version_key, "")
@@ -185,6 +211,8 @@ class UTCPConfig:
             name=service_name,
             openapi_url=openapi_url,
             auth_type=auth_type,
+            token=token,
+            insecure=insecure,
             enabled=enabled,
             version=version,
             dynamic=dynamic,

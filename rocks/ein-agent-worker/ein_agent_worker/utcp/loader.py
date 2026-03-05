@@ -6,13 +6,80 @@ Only GET operations are exposed to ensure read-only access.
 
 import json
 import logging
+import re
+import ssl
 from pathlib import Path
 from typing import Callable, List, Optional
 
 from agents import function_tool
+from utcp.data.variable_loader import VariableLoader
 from utcp.utcp_client import UtcpClient
 
 logger = logging.getLogger(__name__)
+
+# Track if SSL verification has been disabled
+_ssl_verification_disabled = False
+
+
+def disable_ssl_verification() -> None:
+    """Disable SSL certificate verification globally for aiohttp.
+
+    WARNING: Only use this for development/testing with self-signed certs.
+    This patches aiohttp to disable SSL verification.
+    """
+    global _ssl_verification_disabled
+    if _ssl_verification_disabled:
+        return
+
+    import aiohttp
+
+    # Create an insecure SSL context
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+
+    # Patch aiohttp's TCPConnector to use insecure SSL by default
+    _original_init = aiohttp.TCPConnector.__init__
+
+    def _patched_init(self, *args, **kwargs):
+        if "ssl" not in kwargs:
+            kwargs["ssl"] = ssl_context
+        _original_init(self, *args, **kwargs)
+
+    aiohttp.TCPConnector.__init__ = _patched_init
+
+    # Also patch ClientSession to pass ssl=False by default
+    _original_request = aiohttp.ClientSession._request
+
+    async def _patched_request(self, method, url, **kwargs):
+        if "ssl" not in kwargs:
+            kwargs["ssl"] = False
+        return await _original_request(self, method, url, **kwargs)
+
+    aiohttp.ClientSession._request = _patched_request
+
+    _ssl_verification_disabled = True
+    logger.warning("SSL verification disabled for aiohttp - use only for development")
+
+
+class K8sBearerTokenLoader(VariableLoader):
+    """Variable loader that provides K8s bearer token for direct API access.
+
+    UTCP's OpenAPI security definitions require API key variables to be resolved.
+    This loader provides the bearer token for k8s_API_KEY_* variables.
+    """
+
+    variable_loader_type: str = "k8s_bearer"
+    token: str
+
+    def __init__(self, token: str, **kwargs):
+        super().__init__(token=token, **kwargs)
+
+    def get(self, key: str) -> Optional[str]:
+        """Return bearer token for k8s API key variables."""
+        if re.match(r"k8s_API_KEY_\d+", key) or re.match(r"kubernetes_API_KEY_\d+", key):
+            return f"Bearer {self.token}"
+        return None
 
 # Default specs directory (relative to this file)
 DEFAULT_SPECS_DIR = Path(__file__).parent.parent.parent / "specs"
@@ -159,8 +226,11 @@ def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callab
         except json.JSONDecodeError as e:
             return json.dumps({"error": f"Invalid JSON arguments: {e}"})
         except Exception as e:
-            logger.error(f"Error calling {service_name} operation {tool_name}: {e}")
-            return json.dumps({"error": str(e)})
+            import traceback
+            error_msg = str(e) or type(e).__name__
+            logger.error(f"Error calling {service_name} operation {tool_name}: {error_msg}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
+            return json.dumps({"error": error_msg})
 
     return [search_operations, get_operation_details, call_operation]
 
@@ -190,29 +260,66 @@ class ToolLoader:
         self.specs_dir = specs_dir or DEFAULT_SPECS_DIR
         self._clients: dict[str, UtcpClient] = {}
 
-    async def create_client(self, service_name: str, openapi_url: str) -> UtcpClient:
+    async def create_client(
+        self,
+        service_name: str,
+        openapi_url: str,
+        auth_type: str = "proxy",
+        token: str = "",
+        insecure: bool = False,
+    ) -> UtcpClient:
         """Create a UTCP client for a service.
 
         Args:
             service_name: Service name (e.g., 'kubernetes', 'grafana')
             openapi_url: URL to the OpenAPI spec endpoint
+            auth_type: Authentication type ('proxy', 'bearer', 'api_key', 'jwt')
+            token: Bearer token for direct API access (required when auth_type='bearer')
+            insecure: Skip TLS verification for self-signed certificates
 
         Returns:
             Configured UtcpClient instance
         """
         from utcp.data.utcp_client_config import UtcpClientConfig
 
-        config = UtcpClientConfig(
-            manual_call_templates=[{
-                "name": service_name,
-                "call_template_type": "http",
-                "url": openapi_url,
-            }],
-            tool_search_strategy={
+        # Disable SSL verification if insecure mode is enabled
+        if insecure:
+            disable_ssl_verification()
+
+        # Build the call template
+        call_template: dict = {
+            "name": service_name,
+            "call_template_type": "http",
+            "url": openapi_url,
+        }
+
+        # Configure authentication for bearer token
+        # K8sBearerTokenLoader resolves API key variables (e.g., kubernetes_API_KEY_0)
+        # referenced in the OpenAPI spec's security schemes.
+        # This works because UTCP client creation now happens at worker startup,
+        # outside Temporal's workflow sandbox.
+        load_variables_from = []
+        if auth_type == "bearer" and token:
+            call_template["auth"] = {
+                "auth_type": "api_key",
+                "api_key": f"Bearer {token}",
+                "var_name": "Authorization",
+                "location": "header",
+            }
+            load_variables_from.append(K8sBearerTokenLoader(token=token))
+            logger.info(f"Configured bearer token auth for {service_name}")
+
+        config_dict: dict = {
+            "manual_call_templates": [call_template],
+            "tool_search_strategy": {
                 "tool_search_strategy_type": "tag_and_description_word_match"
             },
-        )
+        }
 
+        if load_variables_from:
+            config_dict["load_variables_from"] = load_variables_from
+
+        config = UtcpClientConfig(**config_dict)
         client = await UtcpClient.create(config=config)
         self._clients[service_name] = client
         return client

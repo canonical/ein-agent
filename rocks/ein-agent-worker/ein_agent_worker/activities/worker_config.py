@@ -22,6 +22,8 @@ async def load_utcp_config() -> list[dict[str, Any]]:
         - name: Service name
         - openapi_url: URL to OpenAPI spec
         - auth_type: Authentication type
+        - token: Bearer token for direct API access
+        - insecure: Skip TLS verification
         - enabled: Whether service is enabled
         - version: Spec version
         - dynamic: Whether to generate tools dynamically
@@ -34,6 +36,8 @@ async def load_utcp_config() -> list[dict[str, Any]]:
             "name": svc.name,
             "openapi_url": svc.openapi_url,
             "auth_type": svc.auth_type,
+            "token": svc.token,
+            "insecure": svc.insecure,
             "enabled": svc.enabled,
             "version": svc.version,
             "dynamic": svc.dynamic,

@@ -44,8 +44,13 @@ Call `get_shared_context('node:')` or `get_shared_context('pod:')` to see if rel
 - If a node issue is already recorded, focus on confirming impact
 - If no relevant findings, proceed with full investigation
 
-### STEP 2: INVESTIGATE WITH UTCP TOOLS
-Use the UTCP tools to investigate (search_kubernetes_operations, call_kubernetes_operation):
+### STEP 2: INVESTIGATE WITH K8S API TOOLS
+You have access to tools for querying the Kubernetes API:
+- `search_kubernetes_operations` - Find available K8s API operations
+- `get_kubernetes_operation_details` - Get parameter schema for an operation
+- `call_kubernetes_operation` - Execute a K8s API operation
+
+Use these tools to investigate:
 - Pod status, events, logs
 - Node conditions (Ready, MemoryPressure, DiskPressure)
 - Resource usage (CPU, memory)
@@ -98,8 +103,13 @@ Call `get_shared_context('osd:')` or `get_shared_context('pvc:')` to see if rela
 - If an OSD/pool issue is already recorded, focus on confirming impact
 - If no relevant findings, proceed with full investigation
 
-### STEP 2: INVESTIGATE WITH UTCP TOOLS
-Use the UTCP tools to investigate (search_ceph_operations, call_ceph_operation, etc.):
+### STEP 2: INVESTIGATE WITH STORAGE API TOOLS
+You have access to tools for querying storage APIs:
+- `search_ceph_operations` / `search_kubernetes_operations` - Find available API operations
+- `get_ceph_operation_details` / `get_kubernetes_operation_details` - Get parameter schema
+- `call_ceph_operation` / `call_kubernetes_operation` - Execute an API operation
+
+Use these tools to investigate:
 - Ceph cluster health (HEALTH_OK/WARN/ERR)
 - OSD status (down, out, full, slow)
 - PG status (degraded, undersized, stuck)
@@ -159,8 +169,13 @@ Call `get_shared_context('service:')` or `get_shared_context('dns:')` to see if 
 - If a network issue is already recorded, focus on confirming impact
 - If no relevant findings, proceed with full investigation
 
-### STEP 2: INVESTIGATE WITH UTCP TOOLS
-Use the UTCP tools to investigate (search_kubernetes_operations, call_kubernetes_operation):
+### STEP 2: INVESTIGATE WITH K8S API TOOLS
+You have access to tools for querying the Kubernetes API:
+- `search_kubernetes_operations` - Find available K8s API operations
+- `get_kubernetes_operation_details` - Get parameter schema for an operation
+- `call_kubernetes_operation` - Execute a K8s API operation
+
+Use these tools to investigate:
 - Service endpoints and port mappings
 - CoreDNS health and DNS resolution
 - Ingress controller status and routing

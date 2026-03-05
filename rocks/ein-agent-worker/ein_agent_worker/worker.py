@@ -14,10 +14,45 @@ from ein_agent_worker.activities.alertmanager import fetch_alerts_activity
 from ein_agent_worker.activities.worker_config import load_worker_model, load_utcp_config
 from ein_agent_worker.workflows.incident_correlation_workflow import IncidentCorrelationWorkflow
 from ein_agent_worker.workflows.human_in_the_loop import HumanInTheLoopWorkflow
+from ein_agent_worker.utcp.config import UTCPConfig
+from ein_agent_worker.utcp.loader import ToolLoader
+from ein_agent_worker.utcp import registry as utcp_registry
+from ein_agent_worker.utcp.temporal_utcp import get_utcp_activities
 from temporalio.contrib.openai_agents import OpenAIAgentsPlugin, ModelActivityParameters
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+async def initialize_utcp_clients() -> None:
+    """Initialize UTCP clients at worker startup.
+
+    This runs outside the Temporal workflow sandbox, so network I/O is allowed.
+    Clients are stored in the registry for workflows to access.
+    """
+    config = UTCPConfig.from_env()
+
+    if not config.enabled_services:
+        logger.info("No UTCP services configured")
+        return
+
+    logger.info(f"Initializing {len(config.enabled_services)} UTCP service(s)")
+    loader = ToolLoader()
+
+    for svc in config.enabled_services:
+        try:
+            logger.info(f"Creating UTCP client for {svc.name} at {svc.openapi_url}")
+            client = await loader.create_client(
+                service_name=svc.name,
+                openapi_url=svc.openapi_url,
+                auth_type=svc.auth_type,
+                token=svc.token,
+                insecure=svc.insecure,
+            )
+            utcp_registry.register_client(svc.name, client)
+            logger.info(f"UTCP client for {svc.name} initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize UTCP client for {svc.name}: {e}")
 
 
 async def main():
@@ -29,6 +64,10 @@ async def main():
     model = os.getenv("EIN_AGENT_MODEL", DEFAULT_MODEL)
 
     logger.info(f"Using LLM model: {model}")
+
+    # Initialize UTCP clients at startup (before workflows run)
+    # This allows network I/O outside the Temporal sandbox
+    await initialize_utcp_clients()
 
     # Create Temporal client
     client = await Client.connect(
@@ -59,7 +98,12 @@ async def main():
             IncidentCorrelationWorkflow,
             HumanInTheLoopWorkflow,
         ],
-        activities=[load_worker_model, load_utcp_config, fetch_alerts_activity],
+        activities=[
+            load_worker_model,
+            load_utcp_config,
+            fetch_alerts_activity,
+            *get_utcp_activities(),
+        ],
     )
 
     logger.info("Worker started successfully on queue: %s", queue)
