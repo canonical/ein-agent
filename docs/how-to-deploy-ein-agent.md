@@ -140,18 +140,24 @@ env:
     value: http://localhost:8080/openapi/v2
   - name: UTCP_KUBERNETES_AUTH_TYPE
     value: proxy
+  - name: UTCP_KUBERNETES_VERSION
+    value: "1.35"  # Optional: uses local spec file if available
 
   # Grafana
   - name: UTCP_GRAFANA_OPENAPI_URL
     value: http://grafana.cos.svc.cluster.local:3000/api/swagger.json
   - name: UTCP_GRAFANA_AUTH_TYPE
     value: api_key
+  - name: UTCP_GRAFANA_VERSION
+    value: "12"  # Optional: uses local spec file if available
 
   # Ceph
   - name: UTCP_CEPH_OPENAPI_URL
     value: https://ceph-mgr.ceph.svc.cluster.local:8443/api/openapi.json
   - name: UTCP_CEPH_AUTH_TYPE
     value: jwt
+  - name: UTCP_CEPH_VERSION
+    value: "tentacle"  # Optional: uses local spec file if available
 
   # Agent model
   - name: EIN_AGENT_MODEL
@@ -180,6 +186,60 @@ UTCP (Universal Tool Calling Protocol) generates tools dynamically from OpenAPI 
 - **kubernetes**: Requires kubectl proxy or direct API access
 - **grafana**: Requires Grafana API key
 - **ceph**: Requires Ceph dashboard JWT token
+
+### OpenAPI Spec Loading: Local Files vs Live URLs
+
+UTCP supports loading OpenAPI specs from either **local files** or **live URLs**. Local files take priority - if a local spec file exists, it will be used instead of fetching from the live URL.
+
+**Loading Priority:**
+1. Check for local spec file at `specs/{service_name}/{version}.json`
+2. If found → Load from local file (faster, works offline)
+3. If not found → Fetch from `UTCP_{SERVICE}_OPENAPI_URL`
+
+**Local Spec Directory Structure:**
+```
+rocks/ein-agent-worker/specs/
+├── kubernetes/
+│   └── 1.35.json
+├── grafana/
+│   └── 12.json
+└── ceph/
+    └── tentacle.json
+```
+
+**Using Local Spec Files:**
+
+1. Download the spec to the appropriate directory:
+   ```bash
+   # Example: Download Kubernetes OpenAPI spec
+   curl -k "https://<K8S_SERVER>/openapi/v2" -o specs/kubernetes/1.35.json
+   ```
+
+2. Set the version in your environment configuration:
+   ```yaml
+   - name: UTCP_KUBERNETES_VERSION
+     value: "1.35"
+   ```
+
+3. The worker will automatically use the local file when it exists.
+
+**Forcing Live URL Loading:**
+
+To always fetch from the live URL, either:
+- Remove the local spec file, OR
+- Set `UTCP_{SERVICE}_VERSION` to a version that doesn't have a local file
+
+**Log Output:**
+
+Local file loading:
+```
+[kubernetes] Loading OpenAPI spec from LOCAL file: .../specs/kubernetes/1.35.json
+```
+
+Live URL loading:
+```
+[kubernetes] Loading OpenAPI spec from LIVE URL: https://10.x.x.x:6443/openapi/v2
+```
 
 ## Offline/Air-gapped Deployment
 

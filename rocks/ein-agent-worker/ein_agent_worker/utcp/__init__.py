@@ -28,6 +28,12 @@ from ein_agent_worker.utcp.temporal_utcp import (
     create_utcp_workflow_tools,
     get_utcp_activities,
 )
+from ein_agent_worker.utcp.local_file_protocol import (
+    LocalFileHttpProtocol,
+    register_local_file_protocol,
+    set_api_base_url,
+    get_api_base_url,
+)
 
 __all__ = [
     "UTCPConfig",
@@ -42,4 +48,8 @@ __all__ = [
     "registry",
     "create_utcp_workflow_tools",
     "get_utcp_activities",
+    "LocalFileHttpProtocol",
+    "register_local_file_protocol",
+    "set_api_base_url",
+    "get_api_base_url",
 ]

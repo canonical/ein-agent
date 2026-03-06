@@ -15,6 +15,11 @@ from agents import function_tool
 from utcp.data.variable_loader import VariableLoader
 from utcp.utcp_client import UtcpClient
 
+from ein_agent_worker.utcp.local_file_protocol import (
+    register_local_file_protocol,
+    set_api_base_url,
+)
+
 logger = logging.getLogger(__name__)
 
 # Track if SSL verification has been disabled
@@ -267,6 +272,7 @@ class ToolLoader:
         auth_type: str = "proxy",
         token: str = "",
         insecure: bool = False,
+        version: str = "",
     ) -> UtcpClient:
         """Create a UTCP client for a service.
 
@@ -276,21 +282,53 @@ class ToolLoader:
             auth_type: Authentication type ('proxy', 'bearer', 'api_key', 'jwt')
             token: Bearer token for direct API access (required when auth_type='bearer')
             insecure: Skip TLS verification for self-signed certificates
+            version: Version of the spec to use (for local spec file lookup)
 
         Returns:
             Configured UtcpClient instance
         """
         from utcp.data.utcp_client_config import UtcpClientConfig
 
+        # Register our custom HTTP protocol that supports file:// URLs
+        # This is idempotent and only registers once
+        register_local_file_protocol()
+
         # Disable SSL verification if insecure mode is enabled
         if insecure:
             disable_ssl_verification()
+
+        # Determine spec source: local file or live URL
+        spec_source = openapi_url
+        spec_type = "live"
+
+        # Check for local spec file first
+        local_spec_path = self.get_spec_path(service_name, version)
+        if local_spec_path and local_spec_path.exists():
+            spec_source = f"file://{local_spec_path}"
+            spec_type = "local"
+            # Register the real API URL so that API calls go to the correct endpoint
+            # (not the file:// URL which is only for loading the spec)
+            set_api_base_url(service_name, openapi_url)
+            logger.info(
+                f"[{service_name}] Loading OpenAPI spec from LOCAL file: {local_spec_path}"
+            )
+            logger.info(
+                f"[{service_name}] API calls will use: {openapi_url}"
+            )
+        else:
+            logger.info(
+                f"[{service_name}] Loading OpenAPI spec from LIVE URL: {openapi_url}"
+            )
+            if local_spec_path:
+                logger.debug(
+                    f"[{service_name}] Local spec path checked but not found: {local_spec_path}"
+                )
 
         # Build the call template
         call_template: dict = {
             "name": service_name,
             "call_template_type": "http",
-            "url": openapi_url,
+            "url": spec_source,
         }
 
         # Configure authentication for bearer token
@@ -307,7 +345,7 @@ class ToolLoader:
                 "location": "header",
             }
             load_variables_from.append(K8sBearerTokenLoader(token=token))
-            logger.info(f"Configured bearer token auth for {service_name}")
+            logger.info(f"[{service_name}] Configured bearer token authentication")
 
         config_dict: dict = {
             "manual_call_templates": [call_template],
@@ -319,9 +357,11 @@ class ToolLoader:
         if load_variables_from:
             config_dict["load_variables_from"] = load_variables_from
 
+        logger.info(f"[{service_name}] Creating UTCP client (spec_type={spec_type})")
         config = UtcpClientConfig(**config_dict)
         client = await UtcpClient.create(config=config)
         self._clients[service_name] = client
+        logger.info(f"[{service_name}] UTCP client created successfully")
         return client
 
     def load_service_tools(

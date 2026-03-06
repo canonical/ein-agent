@@ -41,16 +41,15 @@ async def initialize_utcp_clients() -> None:
 
     for svc in config.enabled_services:
         try:
-            logger.info(f"Creating UTCP client for {svc.name} at {svc.openapi_url}")
             client = await loader.create_client(
                 service_name=svc.name,
                 openapi_url=svc.openapi_url,
                 auth_type=svc.auth_type,
                 token=svc.token,
                 insecure=svc.insecure,
+                version=svc.version,
             )
             utcp_registry.register_client(svc.name, client)
-            logger.info(f"UTCP client for {svc.name} initialized successfully")
         except Exception as e:
             logger.error(f"Failed to initialize UTCP client for {svc.name}: {e}")
 
