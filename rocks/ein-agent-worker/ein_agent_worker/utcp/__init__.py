@@ -34,8 +34,25 @@ from ein_agent_worker.utcp.local_file_protocol import (
     set_api_base_url,
     get_api_base_url,
 )
+from ein_agent_worker.utcp.openapi_handlers import (
+    OpenApiHandler,
+    DefaultOpenApiHandler,
+    KubernetesOpenApiHandler,
+    GrafanaOpenApiHandler,
+    BearerTokenLoader,
+    DEFAULT_OPENAPI_HANDLERS,
+)
+from ein_agent_worker.utcp.spec import (
+    SpecSourceStrategy,
+    AutoStrategy,
+    LocalFileStrategy,
+    LiveURLStrategy,
+    SpecSource,
+)
+from ein_agent_worker.utcp.ssl_config import SSLConfigManager
 
 __all__ = [
+    # Config
     "UTCPConfig",
     "UTCPServiceConfig",
     "KubernetesVersion",
@@ -43,13 +60,32 @@ __all__ = [
     "GrafanaVersion",
     "SUPPORTED_VERSIONS",
     "DEFAULT_VERSIONS",
+    # Loader
     "ToolLoader",
     "create_utcp_tools",
+    # Registry
     "registry",
+    # Temporal
     "create_utcp_workflow_tools",
     "get_utcp_activities",
+    # Protocol
     "LocalFileHttpProtocol",
     "register_local_file_protocol",
     "set_api_base_url",
     "get_api_base_url",
+    # OpenAPI Handlers
+    "OpenApiHandler",
+    "DefaultOpenApiHandler",
+    "KubernetesOpenApiHandler",
+    "GrafanaOpenApiHandler",
+    "BearerTokenLoader",
+    "DEFAULT_OPENAPI_HANDLERS",
+    # Spec Strategies
+    "SpecSourceStrategy",
+    "AutoStrategy",
+    "LocalFileStrategy",
+    "LiveURLStrategy",
+    "SpecSource",
+    # SSL
+    "SSLConfigManager",
 ]

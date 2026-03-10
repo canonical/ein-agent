@@ -6,105 +6,25 @@ Only GET operations are exposed to ensure read-only access.
 
 import json
 import logging
-import re
-import ssl
 from pathlib import Path
 from typing import Callable, List, Optional
 
 from agents import function_tool
-from utcp.data.variable_loader import VariableLoader
 from utcp.utcp_client import UtcpClient
 
 from ein_agent_worker.utcp.local_file_protocol import (
     register_local_file_protocol,
     set_api_base_url,
 )
+from ein_agent_worker.utcp.openapi_handlers import (
+    DEFAULT_OPENAPI_HANDLERS,
+    OpenApiHandler,
+)
+from ein_agent_worker.utcp.openapi_handlers.default import DefaultOpenApiHandler
+from ein_agent_worker.utcp.spec.strategy import AutoStrategy, SpecSourceStrategy
+from ein_agent_worker.utcp.ssl_config import SSLConfigManager
 
 logger = logging.getLogger(__name__)
-
-# Track if SSL verification has been disabled
-_ssl_verification_disabled = False
-
-
-def disable_ssl_verification() -> None:
-    """Disable SSL certificate verification globally for aiohttp.
-
-    WARNING: Only use this for development/testing with self-signed certs.
-    This patches aiohttp to disable SSL verification.
-    """
-    global _ssl_verification_disabled
-    if _ssl_verification_disabled:
-        return
-
-    import aiohttp
-
-    # Create an insecure SSL context
-    ssl_context = ssl.create_default_context()
-    ssl_context.check_hostname = False
-    ssl_context.verify_mode = ssl.CERT_NONE
-
-    # Patch aiohttp's TCPConnector to use insecure SSL by default
-    _original_init = aiohttp.TCPConnector.__init__
-
-    def _patched_init(self, *args, **kwargs):
-        if "ssl" not in kwargs:
-            kwargs["ssl"] = ssl_context
-        _original_init(self, *args, **kwargs)
-
-    aiohttp.TCPConnector.__init__ = _patched_init
-
-    # Also patch ClientSession to pass ssl=False by default
-    _original_request = aiohttp.ClientSession._request
-
-    async def _patched_request(self, method, url, **kwargs):
-        if "ssl" not in kwargs:
-            kwargs["ssl"] = False
-        return await _original_request(self, method, url, **kwargs)
-
-    aiohttp.ClientSession._request = _patched_request
-
-    _ssl_verification_disabled = True
-    logger.warning("SSL verification disabled for aiohttp - use only for development")
-
-
-class K8sBearerTokenLoader(VariableLoader):
-    """Variable loader that provides K8s bearer token for direct API access.
-
-    UTCP's OpenAPI security definitions require API key variables to be resolved.
-    This loader provides the bearer token for k8s_API_KEY_* variables.
-    """
-
-    variable_loader_type: str = "k8s_bearer"
-    token: str
-
-    def __init__(self, token: str, **kwargs):
-        super().__init__(token=token, **kwargs)
-
-    def get(self, key: str) -> Optional[str]:
-        """Return bearer token for k8s API key variables."""
-        if re.match(r"k8s_API_KEY_\d+", key) or re.match(r"kubernetes_API_KEY_\d+", key):
-            return f"Bearer {self.token}"
-        return None
-
-
-class GrafanaBearerTokenLoader(VariableLoader):
-    """Variable loader that provides Grafana bearer token for direct API access.
-
-    UTCP's OpenAPI security definitions require API key variables to be resolved.
-    This loader provides the bearer token for grafana_API_KEY_* variables.
-    """
-
-    variable_loader_type: str = "grafana_bearer"
-    token: str
-
-    def __init__(self, token: str, **kwargs):
-        super().__init__(token=token, **kwargs)
-
-    def get(self, key: str) -> Optional[str]:
-        """Return bearer token for Grafana API key variables."""
-        if re.match(r"grafana_API_KEY_\d+", key):
-            return f"Bearer {self.token}"
-        return None
 
 # Default specs directory (relative to this file)
 DEFAULT_SPECS_DIR = Path(__file__).parent.parent.parent / "specs"
@@ -112,9 +32,7 @@ DEFAULT_SPECS_DIR = Path(__file__).parent.parent.parent / "specs"
 
 def _serialize_result(result) -> str:
     """Serialize a result to JSON string."""
-    if isinstance(result, dict):
-        return json.dumps(result, indent=2)
-    elif isinstance(result, list):
+    if isinstance(result, (dict, list)):
         return json.dumps(result, indent=2)
     return str(result)
 
@@ -356,16 +274,37 @@ def _serialize_schema(obj) -> dict:
 
 
 class ToolLoader:
-    """Load UTCP tools for services."""
+    """Load UTCP tools for services.
 
-    def __init__(self, specs_dir: Optional[Path] = None):
+    Orchestrates client creation using injected strategies and handlers:
+    - SpecSourceStrategy: determines where to load specs from (local/live/auto)
+    - OpenApiHandler: provides service-specific auth and spec preprocessing
+    - SSLConfigManager: manages SSL verification settings
+    """
+
+    def __init__(
+        self,
+        specs_dir: Optional[Path] = None,
+        spec_strategy: Optional[SpecSourceStrategy] = None,
+        openapi_handlers: Optional[dict[str, OpenApiHandler]] = None,
+        ssl_manager: Optional[SSLConfigManager] = None,
+    ):
         """Initialize the tool loader.
 
         Args:
             specs_dir: Directory containing OpenAPI spec files.
                        Defaults to specs/ directory relative to package.
+            spec_strategy: Strategy for resolving spec sources.
+                           Defaults to AutoStrategy (local first, then live).
+            openapi_handlers: Map of service name to OpenApiHandler.
+                              Defaults to DEFAULT_OPENAPI_HANDLERS.
+            ssl_manager: SSL configuration manager.
+                         Defaults to a new SSLConfigManager instance.
         """
         self.specs_dir = specs_dir or DEFAULT_SPECS_DIR
+        self.spec_strategy = spec_strategy or AutoStrategy()
+        self.openapi_handlers = openapi_handlers or DEFAULT_OPENAPI_HANDLERS
+        self.ssl_manager = ssl_manager or SSLConfigManager()
         self._clients: dict[str, UtcpClient] = {}
 
     async def create_client(
@@ -392,75 +331,32 @@ class ToolLoader:
         """
         from utcp.data.utcp_client_config import UtcpClientConfig
 
-        # Register our custom HTTP protocol that supports file:// URLs
-        # This is idempotent and only registers once
+        # 1. Register protocol (idempotent)
         register_local_file_protocol()
 
-        # Disable SSL verification if insecure mode is enabled
+        # 2. Configure SSL if needed
         if insecure:
-            disable_ssl_verification()
+            self.ssl_manager.disable_ssl_verification()
 
-        # Determine spec source: local file or live URL
-        spec_source = openapi_url
-        spec_type = "live"
+        # 3. Resolve spec source
+        spec_source = self.spec_strategy.resolve(
+            service_name, openapi_url, version, self.specs_dir
+        )
+        set_api_base_url(service_name, spec_source.api_base_url)
 
-        # Calculate API base URL (strip /openapi/v2 or /openapi/v3 suffix)
-        # This is needed when OpenAPI specs don't specify basePath/servers
-        api_base_url = openapi_url
-        original_url = openapi_url
-        for suffix in ["/openapi/v2", "/openapi/v3", "/openapi"]:
-            if api_base_url.endswith(suffix):
-                api_base_url = api_base_url[:-len(suffix)]
-                logger.debug(
-                    f"[{service_name}] Stripped '{suffix}' from URL: {original_url} → {api_base_url}"
-                )
-                break
+        # 4. Get OpenAPI handler
+        handler = self.openapi_handlers.get(
+            service_name, DefaultOpenApiHandler(service_name)
+        )
 
-        # Check for local spec file first
-        local_spec_path = self.get_spec_path(service_name, version)
-        if local_spec_path and local_spec_path.exists():
-            spec_source = f"file://{local_spec_path}"
-            spec_type = "local"
-            # Register the real API base URL so that API calls go to the correct endpoint
-            # (not the file:// URL which is only for loading the spec)
-            set_api_base_url(service_name, api_base_url)
-            logger.info(
-                f"[{service_name}] Loading OpenAPI spec from LOCAL file: {local_spec_path}"
-            )
-            logger.info(
-                f"[{service_name}] API calls will use base: {api_base_url}"
-            )
-        else:
-            # For live URLs, also register the API base URL
-            # This ensures proper base path when OpenAPI spec doesn't define basePath/servers
-            set_api_base_url(service_name, api_base_url)
-            logger.info(
-                f"[{service_name}] Loading OpenAPI spec from LIVE URL: {openapi_url}"
-            )
-            logger.info(
-                f"[{service_name}] API calls will use base: {api_base_url}"
-            )
-            if local_spec_path:
-                logger.debug(
-                    f"[{service_name}] Local spec path checked but not found: {local_spec_path}"
-                )
-
-        # Build the call template
-        # NOTE: The 'url' field is used for loading the OpenAPI spec.
-        # For local specs (file://), we register the real API base URL separately
-        # so that OpenApiConverter can use it when converting operations.
+        # 5. Build call template
         call_template: dict = {
             "name": service_name,
             "call_template_type": "http",
-            "url": spec_source,
+            "url": spec_source.url,
         }
 
-        # Configure authentication for bearer token
-        # K8sBearerTokenLoader resolves API key variables (e.g., kubernetes_API_KEY_0)
-        # GrafanaBearerTokenLoader resolves API key variables (e.g., grafana_API_KEY_204)
-        # referenced in the OpenAPI spec's security schemes.
-        # This works because UTCP client creation now happens at worker startup,
-        # outside Temporal's workflow sandbox.
+        # 6. Configure auth using handler
         load_variables_from = []
         if auth_type == "bearer" and token:
             call_template["auth"] = {
@@ -469,27 +365,25 @@ class ToolLoader:
                 "var_name": "Authorization",
                 "location": "header",
             }
-            # Use service-specific variable loader
-            if service_name == "grafana":
-                load_variables_from.append(GrafanaBearerTokenLoader(token=token))
-            else:
-                load_variables_from.append(K8sBearerTokenLoader(token=token))
+            variable_loader = handler.get_variable_loader(token)
+            if variable_loader:
+                load_variables_from.append(variable_loader)
             logger.info(f"[{service_name}] Configured bearer token authentication")
 
+        # 7. Create config and client
         config_dict: dict = {
             "manual_call_templates": [call_template],
             "tool_search_strategy": {
                 "tool_search_strategy_type": "tag_and_description_word_match"
             },
         }
-
         if load_variables_from:
             config_dict["load_variables_from"] = load_variables_from
 
-        logger.info(f"[{service_name}] Creating UTCP client (spec_type={spec_type})")
+        logger.info(f"[{service_name}] Creating UTCP client (spec_type={spec_source.source_type})")
         logger.info(f"[{service_name}] Final configuration:")
-        logger.info(f"  - Spec source: {spec_source}")
-        logger.info(f"  - API base URL: {api_base_url}")
+        logger.info(f"  - Spec source: {spec_source.url}")
+        logger.info(f"  - API base URL: {spec_source.api_base_url}")
         logger.info(f"  - Auth type: {auth_type}")
         logger.info(f"  - Insecure mode: {insecure}")
 
@@ -514,44 +408,6 @@ class ToolLoader:
             List of function tools for the agent
         """
         return create_utcp_tools(utcp_client, service_name)
-
-    def get_spec_path(self, service_name: str, version: str = "") -> Optional[Path]:
-        """Get the path to a service's OpenAPI spec file.
-
-        Args:
-            service_name: Service name (e.g., 'kubernetes', 'grafana')
-            version: Version string (e.g., '1.35', 'tentacle', '12')
-
-        Returns:
-            Path to spec file if it exists, None otherwise
-        """
-        from ein_agent_worker.utcp.config import DEFAULT_VERSIONS
-
-        service_dir = self.specs_dir / service_name
-
-        if not service_dir.exists():
-            logger.warning(f"Spec directory not found: {service_dir}")
-            return None
-
-        # Use default version if not specified
-        if not version:
-            version = DEFAULT_VERSIONS.get(service_name.lower(), "")
-
-        # Look for the version-specific file
-        if version:
-            for ext in [".json", ".yaml", ".yml"]:
-                spec_path = service_dir / f"{version}{ext}"
-                if spec_path.exists():
-                    return spec_path
-
-        # Fallback: find any available spec
-        for ext in [".json", ".yaml", ".yml"]:
-            spec_files = list(service_dir.glob(f"*{ext}"))
-            if spec_files:
-                return spec_files[0]
-
-        logger.warning(f"No spec file found for {service_name}")
-        return None
 
     def list_available_versions(self, service_name: str) -> List[str]:
         """List available spec versions for a service.

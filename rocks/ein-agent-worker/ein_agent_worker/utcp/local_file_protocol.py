@@ -8,7 +8,7 @@ OpenAPI specs from local files for offline development and testing.
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 from urllib.parse import urlparse
 
 import yaml
@@ -18,6 +18,9 @@ from utcp.data.utcp_manual import UtcpManual, UtcpManualSerializer
 from utcp_http.http_call_template import HttpCallTemplate
 from utcp_http.http_communication_protocol import HttpCommunicationProtocol
 from utcp_http.openapi_converter import OpenApiConverter
+
+from ein_agent_worker.utcp.openapi_handlers import DEFAULT_OPENAPI_HANDLERS, OpenApiHandler
+from ein_agent_worker.utcp.openapi_handlers.default import DefaultOpenApiHandler
 
 if TYPE_CHECKING:
     from utcp.utcp_client import UtcpClient
@@ -46,7 +49,7 @@ def set_api_base_url(service_name: str, url: str) -> None:
     logger.debug(f"Registered API base URL for {service_name}: {url}")
 
 
-def get_api_base_url(service_name: str) -> str | None:
+def get_api_base_url(service_name: str) -> Optional[str]:
     """Get the registered API base URL for a service.
 
     Args:
@@ -67,6 +70,13 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
     This allows using local OpenAPI spec files during development without
     requiring a live API server, while still supporting live URLs in production.
     """
+
+    def __init__(
+        self,
+        openapi_handlers: Optional[dict[str, OpenApiHandler]] = None,
+    ):
+        super().__init__()
+        self.openapi_handlers = openapi_handlers or DEFAULT_OPENAPI_HANDLERS
 
     async def register_manual(
         self, caller: "UtcpClient", manual_call_template: CallTemplate
@@ -139,16 +149,11 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
                 service_name = manual_call_template.name
                 api_base_url = get_api_base_url(service_name)
 
-                # For Grafana: Force api_key security only (remove basic auth)
-                # We use service account tokens, not username/password
-                if service_name == "grafana":
-                    if "security" in spec_data:
-                        spec_data["security"] = [{"api_key": []}]
-                        logger.info(f"[{service_name}] Forcing api_key security (token-based auth)")
-                    # Remove basic auth from securityDefinitions if present
-                    if "securityDefinitions" in spec_data and "basic" in spec_data["securityDefinitions"]:
-                        del spec_data["securityDefinitions"]["basic"]
-                        logger.info(f"[{service_name}] Removed basic auth from security definitions")
+                # Apply service-specific preprocessing via handler
+                handler = self.openapi_handlers.get(
+                    service_name, DefaultOpenApiHandler(service_name)
+                )
+                spec_data = handler.preprocess_spec(spec_data, service_name)
 
                 # Construct the full base URL for API operations
                 # OpenApiConverter uses spec_url as the base for all API calls
