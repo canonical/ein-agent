@@ -15,6 +15,7 @@ class DefaultOpenApiHandler(OpenApiHandler):
 
     Provides a generic bearer token loader based on service name and
     passes specs through without modification.
+    Supported auth types are defined in config.SERVICE_AUTH_TYPES.
     """
 
     def __init__(self, service_name: str = ""):

@@ -4,11 +4,14 @@ Tools are created from OpenAPI specification files stored in the specs/ director
 Only GET operations are exposed to ensure read-only access.
 """
 
+import base64
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Callable, List, Optional
 
+import yaml
 from agents import function_tool
 from utcp.utcp_client import UtcpClient
 
@@ -273,6 +276,76 @@ def _serialize_schema(obj) -> dict:
     return obj
 
 
+def _extract_token_from_kubeconfig(kubeconfig_data: dict, service_name: str) -> str:
+    """Extract bearer token from kubeconfig dictionary (IN MEMORY).
+
+    This method processes kubeconfig entirely in memory without writing to disk,
+    ensuring credentials are never persisted to the filesystem.
+
+    Args:
+        kubeconfig_data: Parsed kubeconfig as dictionary
+        service_name: Service name for logging
+
+    Returns:
+        Bearer token string (without "Bearer " prefix)
+
+    Raises:
+        ValueError: If token cannot be extracted from kubeconfig
+    """
+    try:
+        # Get current context
+        current_context = kubeconfig_data.get('current-context')
+        if not current_context:
+            raise ValueError("No current-context found in kubeconfig")
+
+        # Find context and user mappings
+        contexts = {c['name']: c['context'] for c in kubeconfig_data.get('contexts', [])}
+        users = {u['name']: u['user'] for u in kubeconfig_data.get('users', [])}
+
+        if current_context not in contexts:
+            raise ValueError(f"Current context '{current_context}' not found in kubeconfig")
+
+        context = contexts[current_context]
+        user_name = context.get('user')
+
+        if not user_name:
+            raise ValueError(f"No user found in context '{current_context}'")
+
+        user = users.get(user_name, {})
+        if not user:
+            raise ValueError(f"User '{user_name}' not found in kubeconfig users list")
+
+        # Extract token from user config
+        token = user.get('token', '')
+
+        if not token:
+            # Fallback: check for tokenFile reference (less secure, requires disk read)
+            token_file = user.get('tokenFile', '')
+            if token_file:
+                logger.warning(
+                    f"[{service_name}] kubeconfig uses tokenFile reference: {token_file}. "
+                    "For better security, embed the token directly in kubeconfig."
+                )
+                try:
+                    with open(token_file, 'r') as f:
+                        token = f.read().strip()
+                except Exception as e:
+                    raise ValueError(f"Failed to read token from {token_file}: {e}")
+
+        if not token:
+            raise ValueError(
+                f"No token found for user '{user_name}'. "
+                "Ensure kubeconfig contains 'token' field in user configuration."
+            )
+
+        logger.debug(f"[{service_name}] Token extracted successfully (length: {len(token)} chars)")
+        return token
+
+    except Exception as e:
+        logger.error(f"[{service_name}] Kubeconfig parsing error: {e}")
+        raise ValueError(f"Kubeconfig parsing failed: {e}")
+
+
 class ToolLoader:
     """Load UTCP tools for services.
 
@@ -358,16 +431,54 @@ class ToolLoader:
 
         # 6. Configure auth using handler
         load_variables_from = []
-        if auth_type == "bearer" and token:
+        bearer_token = None
+
+        if auth_type == "kubeconfig":
+            # KUBECONFIG AUTH: Extract token from base64-encoded kubeconfig (IN MEMORY)
+            kubeconfig_env_key = f"UTCP_{service_name.upper().replace('-', '_')}_KUBECONFIG_CONTENT"
+            kubeconfig_b64 = os.getenv(kubeconfig_env_key)
+
+            if not kubeconfig_b64:
+                raise ValueError(
+                    f"[{service_name}] {kubeconfig_env_key} environment variable not found. "
+                    "Ensure Juju secret with kubeconfig-content is granted."
+                )
+
+            # Decode and parse kubeconfig (IN MEMORY - NO DISK WRITE)
+            try:
+                kubeconfig_yaml_str = base64.b64decode(kubeconfig_b64).decode('utf-8')
+                kubeconfig_data = yaml.safe_load(kubeconfig_yaml_str)
+                bearer_token = _extract_token_from_kubeconfig(kubeconfig_data, service_name)
+                logger.info(f"[{service_name}] Token extracted from kubeconfig (in-memory, no disk write)")
+            except Exception as e:
+                raise ValueError(f"[{service_name}] Failed to process kubeconfig: {e}")
+
+        elif auth_type == "bearer":
+            # BEARER AUTH: Read token directly from environment or parameter
+            token_env_key = f"UTCP_{service_name.upper().replace('-', '_')}_TOKEN"
+            bearer_token = os.getenv(token_env_key) or token
+
+            if not bearer_token:
+                raise ValueError(
+                    f"[{service_name}] {token_env_key} environment variable not found. "
+                    "Ensure Juju secret with token is granted."
+                )
+
+            logger.info(f"[{service_name}] Using bearer token from environment")
+
+        # Configure bearer auth (unified for both kubeconfig-extracted and direct tokens)
+        if bearer_token:
             call_template["auth"] = {
                 "auth_type": "api_key",
-                "api_key": f"Bearer {token}",
+                "api_key": f"Bearer {bearer_token}",
                 "var_name": "Authorization",
                 "location": "header",
             }
-            variable_loader = handler.get_variable_loader(token)
+
+            variable_loader = handler.get_variable_loader(bearer_token)
             if variable_loader:
                 load_variables_from.append(variable_loader)
+
             logger.info(f"[{service_name}] Configured bearer token authentication")
 
         # 7. Create config and client

@@ -11,11 +11,12 @@ export GEMINI_API_KEY="${GEMINI_API_KEY:-your-gemini-api-key-here}"
 
 export UTCP_SERVICES="kubernetes,grafana"
 
-# Kubernetes UTCP Configuration (direct API access with bearer token)
-# To get these values, run: make setup-k8s-token (or see CLAUDE.md)
+# Kubernetes UTCP Configuration (kubeconfig-based authentication)
+# NOTE: Kubernetes ONLY supports kubeconfig auth (no bearer token support)
+# To generate kubeconfig, see LOCAL_DEVELOPMENT.md
 export UTCP_KUBERNETES_OPENAPI_URL="${UTCP_KUBERNETES_OPENAPI_URL:-https://your-k8s-server:6443/openapi/v2}"
-export UTCP_KUBERNETES_AUTH_TYPE="bearer"
-export UTCP_KUBERNETES_TOKEN="${UTCP_KUBERNETES_TOKEN:-your-kubernetes-token-here}"
+export UTCP_KUBERNETES_AUTH_TYPE="kubeconfig"
+export UTCP_KUBERNETES_KUBECONFIG_CONTENT="${UTCP_KUBERNETES_KUBECONFIG_CONTENT:-$(cat ~/.kube/config 2>/dev/null | base64 -w 0)}"
 export UTCP_KUBERNETES_INSECURE="true"
 export UTCP_KUBERNETES_ENABLED="true"
 export UTCP_KUBERNETES_VERSION="1.35"

@@ -23,7 +23,7 @@ This guide explains how to run the ein-agent-worker locally for development and 
    Edit `run-worker-local.sh.local` and replace placeholder values:
    - `GEMINI_API_KEY`: Your Gemini API key
    - `UTCP_KUBERNETES_OPENAPI_URL`: Your Kubernetes API server URL
-   - `UTCP_KUBERNETES_TOKEN`: ServiceAccount token for Kubernetes access
+   - `UTCP_KUBERNETES_KUBECONFIG_CONTENT`: Base64-encoded kubeconfig with ServiceAccount token
    - `ALERTMANAGER_URL`: Your Alertmanager URL
 
 2. **Install dependencies**
@@ -52,16 +52,16 @@ export EIN_AGENT_MODEL="gemini/gemini-3-flash-preview"
 # UTCP Service Configuration
 export UTCP_SERVICES="kubernetes,grafana"
 
-# Kubernetes UTCP Configuration
+# Kubernetes UTCP Configuration (kubeconfig-based auth)
 export UTCP_KUBERNETES_OPENAPI_URL="https://<K8S_SERVER>:6443/openapi/v2"
-export UTCP_KUBERNETES_AUTH_TYPE="bearer"
-export UTCP_KUBERNETES_TOKEN="<token from kubectl create token>"
+export UTCP_KUBERNETES_AUTH_TYPE="kubeconfig"  # REQUIRED for Kubernetes
+export UTCP_KUBERNETES_KUBECONFIG_CONTENT="$(cat ein-agent-kubeconfig.yaml | base64 -w 0)"
 export UTCP_KUBERNETES_INSECURE="true"  # For self-signed certificates
 export UTCP_KUBERNETES_ENABLED="true"
 export UTCP_KUBERNETES_VERSION="1.35"
 
-# Grafana UTCP Configuration (aggregated API server)
-export UTCP_GRAFANA_OPENAPI_URL="https://<GRAFANA_SERVER>/openapi/v2"
+# Grafana UTCP Configuration (bearer token auth)
+export UTCP_GRAFANA_OPENAPI_URL="https://<GRAFANA_SERVER>/api/swagger.json"
 export UTCP_GRAFANA_AUTH_TYPE="bearer"
 export UTCP_GRAFANA_TOKEN="<grafana service account token>"
 export UTCP_GRAFANA_INSECURE="true"  # For self-signed certificates
@@ -90,16 +90,38 @@ To enable Kubernetes UTCP tools, create a ServiceAccount with appropriate permis
 # Create ServiceAccount
 kubectl create serviceaccount ein-agent -n default
 
-# Create ClusterRoleBinding (cluster-admin for full access)
-kubectl create clusterrolebinding ein-agent-admin \
-    --clusterrole=cluster-admin \
+# Create ClusterRoleBinding (read-only access for troubleshooting)
+kubectl create clusterrolebinding ein-agent-viewer \
+    --clusterrole=view \
     --serviceaccount=default:ein-agent
 
-# Generate token (valid for 24 hours)
-kubectl create token ein-agent -n default --duration=24h
+# Generate kubeconfig with long-lived token (1 year)
+CONTEXT=$(kubectl config current-context)
+CLUSTER=$(kubectl config view -o jsonpath="{.contexts[?(@.name=='$CONTEXT')].context.cluster}")
+SERVER=$(kubectl config view -o jsonpath="{.clusters[?(@.name=='$CLUSTER')].cluster.server}")
+CA_DATA=$(kubectl config view --raw -o jsonpath="{.clusters[?(@.name=='$CLUSTER')].cluster.certificate-authority-data}")
+TOKEN=$(kubectl create token ein-agent -n default --duration=8760h)  # 1 year
 
-# Get the Kubernetes API server URL
-kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}'
+# Create kubeconfig file
+cat > ein-agent-kubeconfig.yaml <<EOF
+apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    certificate-authority-data: $CA_DATA
+    server: $SERVER
+  name: $CLUSTER
+contexts:
+- context:
+    cluster: $CLUSTER
+    user: ein-agent
+  name: ein-agent-context
+current-context: ein-agent-context
+users:
+- name: ein-agent
+  user:
+    token: $TOKEN
+EOF
 ```
 
 ## Development Workflow
@@ -127,8 +149,9 @@ kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}'
 
 ### UTCP tools not loading
 
-- Verify Kubernetes token is valid: `kubectl --token=$UTCP_KUBERNETES_TOKEN get nodes`
+- Verify kubeconfig is valid: `kubectl --kubeconfig=ein-agent-kubeconfig.yaml get nodes`
 - Check OpenAPI URL is accessible: `curl -k $UTCP_KUBERNETES_OPENAPI_URL`
+- Verify kubeconfig is base64-encoded correctly: `echo $UTCP_KUBERNETES_KUBECONFIG_CONTENT | base64 -d | head`
 - Review worker logs for UTCP initialization errors
 
 ### LLM errors

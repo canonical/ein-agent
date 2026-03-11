@@ -13,12 +13,16 @@ logger = logging.getLogger(__name__)
 class KubernetesOpenApiHandler(OpenApiHandler):
     """Handler for Kubernetes API service.
 
-    Handles both 'k8s_API_KEY_*' and 'kubernetes_API_KEY_*' variable patterns
-    for bearer token authentication.
+    Kubernetes only supports kubeconfig-based authentication for long-term
+    credential management. Supported auth types are defined in config.SERVICE_AUTH_TYPES.
     """
 
     def get_variable_loader(self, token: str) -> Optional[VariableLoader]:
-        """Create a bearer token loader for Kubernetes API key variables."""
+        """Create a bearer token loader for Kubernetes API key variables.
+
+        Note: Token is extracted from kubeconfig by the loader, then used
+        for API authentication via the BearerTokenLoader.
+        """
         return BearerTokenLoader(
             token=token,
             patterns=[

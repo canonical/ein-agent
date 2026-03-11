@@ -5,25 +5,30 @@ env:
     value: kubernetes,grafana,ceph
 
   # Kubernetes UTCP Configuration
-  # Uses kubectl proxy or direct API server access
+  # NOTE: Kubernetes ONLY supports kubeconfig auth (no bearer token support)
   - name: UTCP_KUBERNETES_OPENAPI_URL
-    value: http://localhost:8080/openapi/v2
+    value: https://kubernetes.default.svc.cluster.local/openapi/v2
   - name: UTCP_KUBERNETES_AUTH_TYPE
-    value: proxy
+    value: kubeconfig  # REQUIRED: Must be kubeconfig
   - name: UTCP_KUBERNETES_ENABLED
     value: "true"
   - name: UTCP_KUBERNETES_VERSION
     value: "1.35"
+  - name: UTCP_KUBERNETES_INSECURE
+    value: "true"  # For clusters with self-signed certificates
 
   # Grafana UTCP Configuration
+  # NOTE: Grafana uses bearer token (service account token)
   - name: UTCP_GRAFANA_OPENAPI_URL
-    value: http://grafana.cos.svc.cluster.local:3000/api/swagger.json
+    value: https://grafana.cos.svc.cluster.local:3000/api/swagger.json
   - name: UTCP_GRAFANA_AUTH_TYPE
-    value: api_key
+    value: bearer  # Service account token
   - name: UTCP_GRAFANA_ENABLED
     value: "true"
   - name: UTCP_GRAFANA_VERSION
     value: "12"
+  - name: UTCP_GRAFANA_INSECURE
+    value: "true"  # For self-signed certificates
 
   # Ceph UTCP Configuration
   - name: UTCP_CEPH_OPENAPI_URL
@@ -44,4 +49,17 @@ env:
     value: http://alertmanager.cos.svc.cluster.local:9093
 
 juju:
-  - secret-id: d4nsqv7mp25c77vcjq90
+  # Gemini API key
+  - secret-id: <gemini-secret-id>
+    name: GEMINI_API_KEY
+    key: api-key
+
+  # Kubernetes kubeconfig (base64-encoded) - REQUIRED for K8s
+  - secret-id: <kubernetes-secret-id>
+    name: UTCP_KUBERNETES_KUBECONFIG_CONTENT
+    key: kubeconfig-content
+
+  # Grafana service account token - REQUIRED for Grafana
+  - secret-id: <grafana-secret-id>
+    name: UTCP_GRAFANA_TOKEN
+    key: token

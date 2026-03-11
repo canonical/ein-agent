@@ -30,5 +30,6 @@ parts:
     organize:
       ein_agent_worker/*: app/ein_agent_worker/
       scripts/*: app/scripts/
+      specs/*: app/specs/
     stage:
       - app

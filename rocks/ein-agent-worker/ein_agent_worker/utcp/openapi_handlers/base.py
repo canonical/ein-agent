@@ -43,6 +43,9 @@ class OpenApiHandler(ABC):
 
     Subclass this to add custom behavior for a UTCP service, such as
     special authentication or OpenAPI spec preprocessing before conversion.
+
+    Note: Supported auth types are defined in config.SERVICE_AUTH_TYPES to avoid
+    circular imports between config.py and handlers.
     """
 
     @abstractmethod

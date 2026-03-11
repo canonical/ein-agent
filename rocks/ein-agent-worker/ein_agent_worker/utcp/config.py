@@ -3,21 +3,25 @@
 Configuration Format:
     UTCP_SERVICES: Comma-separated list of service names (e.g., "kubernetes,grafana,ceph")
     UTCP_{SERVICE}_OPENAPI_URL: URL to the OpenAPI spec (required)
-    UTCP_{SERVICE}_AUTH_TYPE: Authentication type - 'proxy', 'bearer', 'api_key', 'jwt' (default: proxy)
+    UTCP_{SERVICE}_AUTH_TYPE: Authentication type - 'proxy', 'bearer', 'api_key', 'jwt', 'kubeconfig' (default: proxy)
     UTCP_{SERVICE}_TOKEN: Bearer token for direct API access (required when AUTH_TYPE=bearer)
+    UTCP_{SERVICE}_KUBECONFIG_CONTENT: Base64-encoded kubeconfig (required when AUTH_TYPE=kubeconfig)
     UTCP_{SERVICE}_INSECURE: Skip TLS verification (default: false)
     UTCP_{SERVICE}_ENABLED: Enable/disable the service (default: true)
     UTCP_{SERVICE}_VERSION: Version of the spec to use (default: latest supported)
 
-Example:
-    export UTCP_SERVICES="kubernetes,grafana,ceph"
+Example (Kubernetes with kubeconfig):
+    export UTCP_SERVICES="kubernetes,grafana"
     export UTCP_KUBERNETES_OPENAPI_URL="https://10.0.0.1:6443/openapi/v2"
-    export UTCP_KUBERNETES_AUTH_TYPE="bearer"
-    export UTCP_KUBERNETES_TOKEN="eyJhbGciOiJSUzI1NiIs..."
+    export UTCP_KUBERNETES_AUTH_TYPE="kubeconfig"
+    export UTCP_KUBERNETES_KUBECONFIG_CONTENT="<base64-encoded-kubeconfig>"
     export UTCP_KUBERNETES_INSECURE="true"
     export UTCP_KUBERNETES_VERSION="1.35"
+
+Example (Grafana with bearer token):
     export UTCP_GRAFANA_OPENAPI_URL="https://grafana.example.com/api/swagger.json"
-    export UTCP_GRAFANA_AUTH_TYPE="api_key"
+    export UTCP_GRAFANA_AUTH_TYPE="bearer"
+    export UTCP_GRAFANA_TOKEN="glsa_xxxxxxxxxxxxx"
 """
 
 import logging
@@ -78,6 +82,83 @@ DEFAULT_VERSIONS: dict[str, str] = {
     "ceph": CephVersion.default().value,
     "grafana": GrafanaVersion.default().value,
 }
+
+
+# =============================================================================
+# Auth Validation Helpers
+# =============================================================================
+
+# Service-specific supported auth types mapping
+# This avoids circular imports while maintaining service-specific validation
+SERVICE_AUTH_TYPES: dict[str, tuple[str, ...]] = {
+    "kubernetes": ("kubeconfig",),
+    "grafana": ("bearer",),
+    # Default for other services
+    "_default": ("proxy", "bearer", "api_key", "jwt"),
+}
+
+
+def _get_supported_auth_types(service_name: str) -> tuple[str, ...]:
+    """Get supported auth types for a service.
+
+    Args:
+        service_name: Service name
+
+    Returns:
+        Tuple of supported auth type strings
+    """
+    return SERVICE_AUTH_TYPES.get(service_name, SERVICE_AUTH_TYPES["_default"])
+
+
+def _validate_kubeconfig_auth(service_name: str, service_key: str) -> bool:
+    """Validate kubeconfig authentication configuration.
+
+    Args:
+        service_name: Service name for logging
+        service_key: Uppercase service key for env var lookup
+
+    Returns:
+        True if valid, False otherwise
+    """
+    kubeconfig_key = f"UTCP_{service_key}_KUBECONFIG_CONTENT"
+    kubeconfig_content = os.getenv(kubeconfig_key)
+
+    if not kubeconfig_content:
+        logger.error(
+            "UTCP service '%s' has auth_type='kubeconfig' but %s is not set. "
+            "Ensure Juju secret with kubeconfig-content is granted.",
+            service_name,
+            kubeconfig_key,
+        )
+        return False
+
+    logger.info("UTCP service '%s' configured with kubeconfig authentication", service_name)
+    return True
+
+
+def _validate_bearer_auth(service_name: str, service_key: str) -> bool:
+    """Validate bearer token authentication configuration.
+
+    Args:
+        service_name: Service name for logging
+        service_key: Uppercase service key for env var lookup
+
+    Returns:
+        True if valid, False otherwise
+    """
+    token_key = f"UTCP_{service_key}_TOKEN"
+    token = os.getenv(token_key, "")
+
+    if not token:
+        logger.error(
+            "UTCP service '%s' has auth_type='bearer' but %s is not set",
+            service_name,
+            token_key,
+        )
+        return False
+
+    logger.info("UTCP service '%s' configured with bearer token authentication", service_name)
+    return True
 
 
 @dataclass
@@ -171,29 +252,28 @@ class UTCPConfig:
         auth_type_key = f"UTCP_{service_key}_AUTH_TYPE"
         auth_type = os.getenv(auth_type_key, "proxy").lower()
 
-        # Validate auth type
-        valid_auth_types = ("proxy", "bearer", "api_key", "jwt")
-        if auth_type not in valid_auth_types:
+        # Validate auth type against service-specific supported types
+        supported_auth_types = _get_supported_auth_types(service_name)
+        if auth_type not in supported_auth_types:
             logger.error(
-                "UTCP service '%s' has invalid auth type '%s' (must be one of %s)",
+                "UTCP service '%s' has invalid auth type '%s' (supported: %s)",
                 service_name,
                 auth_type,
-                valid_auth_types,
+                ", ".join(supported_auth_types),
             )
             return None
 
-        # Get token (required for bearer auth)
+        # Validate auth-specific requirements
+        if auth_type == "kubeconfig":
+            if not _validate_kubeconfig_auth(service_name, service_key):
+                return None
+        elif auth_type == "bearer":
+            if not _validate_bearer_auth(service_name, service_key):
+                return None
+
+        # Get token for bearer auth (will be empty for kubeconfig)
         token_key = f"UTCP_{service_key}_TOKEN"
         token = os.getenv(token_key, "")
-
-        # Validate token is provided for bearer auth
-        if auth_type == "bearer" and not token:
-            logger.error(
-                "UTCP service '%s' has auth_type='bearer' but %s is not set",
-                service_name,
-                token_key,
-            )
-            return None
 
         # Get insecure flag (skip TLS verification)
         insecure_key = f"UTCP_{service_key}_INSECURE"

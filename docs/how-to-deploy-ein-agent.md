@@ -110,33 +110,80 @@ make rock-tag
 
 And make sure the image is import and available on the k8s registry.
 
-### Deploy Worker with Juju
+### Create Temporal Namespace
 
-Get the Temporal server address from your deployment. If both the Temporal server and worker are in the same Kubernetes cluster, use the internal service address:
-
-Deploy the worker:
+Create the default namespace if it doesn't exist:
 
 ```bash
-# Deploy worker
-juju deploy temporal-worker-k8s ein-agent-worker --channel stable --resource temporal-worker-image=ghcr.io/jneo8/ein-agent-worker:0.1.0 --config host="temporal-k8s.temporal.svc.cluster.local:7233" --config namespace=default --config queue=ein-agent-queue --config log-level=info
+juju run temporal-admin-k8s/0 -m temporal cli args="operator namespace create --namespace default --retention 3d" --wait 1m
 ```
 
-```sh
-juju run temporal-admin-k8s/0 cli args="operator namespace create --namespace default --retention 3d" --wait 1m
-```
+### Configure Kubernetes ServiceAccount for UTCP
 
-### Add Gemini API key to worker
+Create a ServiceAccount with read-only permissions for the AI agent to troubleshoot Kubernetes:
 
 ```bash
-juju add-secret gemini-api-key gemini-api-key={your-api-key}
+# Create ServiceAccount
+kubectl create serviceaccount ein-agent -n default
 
+# Grant read-only permissions
+kubectl create clusterrolebinding ein-agent-viewer \
+    --clusterrole=view \
+    --serviceaccount=default:ein-agent
+
+# Generate kubeconfig with long-lived token (1 year)
+CONTEXT=$(kubectl config current-context)
+CLUSTER=$(kubectl config view -o jsonpath="{.contexts[?(@.name=='$CONTEXT')].context.cluster}")
+SERVER=$(kubectl config view -o jsonpath="{.clusters[?(@.name=='$CLUSTER')].cluster.server}")
+CA_DATA=$(kubectl config view --raw -o jsonpath="{.clusters[?(@.name=='$CLUSTER')].cluster.certificate-authority-data}")
+TOKEN=$(kubectl create token ein-agent -n default --duration=8760h)  # 1 year
+
+# Create kubeconfig file
+cat > ein-agent-kubeconfig.yaml <<EOF
+apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    certificate-authority-data: $CA_DATA
+    server: $SERVER
+  name: $CLUSTER
+contexts:
+- context:
+    cluster: $CLUSTER
+    user: ein-agent
+  name: ein-agent-context
+current-context: ein-agent-context
+users:
+- name: ein-agent
+  user:
+    token: $TOKEN
+EOF
+
+# Verify kubeconfig works
+kubectl --kubeconfig=ein-agent-kubeconfig.yaml get pods -n default
+```
+
+### Add Secrets to Juju
+
+Create Juju secrets for LLM API key, Kubernetes kubeconfig, and Grafana token:
+
+```bash
+# 1. Gemini API key
+juju add-secret -m temporal gemini-api-key api-key={your-gemini-api-key}
 # Output: secret:<secret_id1>
 
-juju grant-secret gemini-api-key ein-agent-worker
-juju config ein-agent-worker environment=@./environment.yaml
+# 2. Kubernetes kubeconfig (base64-encoded)
+bash -c 'KUBECONFIG_B64=$(cat ein-agent-kubeconfig.yaml | base64 -w 0) && juju add-secret -m temporal kubernetes-auth kubeconfig-content="$KUBECONFIG_B64"'
+# Output: secret:<secret_id2>
+
+# 3. Grafana service account token
+juju add-secret -m temporal grafana-auth token={your-grafana-service-account-token}
+# Output: secret:<secret_id3>
 ```
 
-`environment.yaml`
+### Configure Worker Environment
+
+Create an `environment.yaml` file with your configuration:
 
 ```yaml
 env:
@@ -144,40 +191,99 @@ env:
   - name: UTCP_SERVICES
     value: kubernetes,grafana,ceph
 
-  # Kubernetes - uses kubectl proxy or API server
+  # Kubernetes UTCP Configuration
+  # NOTE: Kubernetes ONLY supports kubeconfig auth (no bearer token support)
   - name: UTCP_KUBERNETES_OPENAPI_URL
-    value: http://localhost:8080/openapi/v2
+    value: https://kubernetes.default.svc.cluster.local/openapi/v2
   - name: UTCP_KUBERNETES_AUTH_TYPE
-    value: proxy
+    value: kubeconfig  # REQUIRED: Must be kubeconfig
+  - name: UTCP_KUBERNETES_ENABLED
+    value: "true"
   - name: UTCP_KUBERNETES_VERSION
-    value: "1.35"  # Optional: uses local spec file if available
+    value: "1.35"
+  - name: UTCP_KUBERNETES_INSECURE
+    value: "true"  # For clusters with self-signed certificates
 
-  # Grafana
+  # Grafana UTCP Configuration
+  # NOTE: Grafana uses bearer token (service account token)
   - name: UTCP_GRAFANA_OPENAPI_URL
-    value: http://grafana.cos.svc.cluster.local:3000/openapi/v2
+    value: https://grafana.cos.svc.cluster.local:3000/api/swagger.json
   - name: UTCP_GRAFANA_AUTH_TYPE
-    value: bearer
+    value: bearer  # Service account token
+  - name: UTCP_GRAFANA_ENABLED
+    value: "true"
   - name: UTCP_GRAFANA_VERSION
-    value: "12"  # Optional: uses local spec file if available
+    value: "12"
+  - name: UTCP_GRAFANA_INSECURE
+    value: "true"  # For self-signed certificates
 
-  # Ceph
+  # Ceph UTCP Configuration
   - name: UTCP_CEPH_OPENAPI_URL
     value: https://ceph-mgr.ceph.svc.cluster.local:8443/api/openapi.json
   - name: UTCP_CEPH_AUTH_TYPE
     value: jwt
+  - name: UTCP_CEPH_ENABLED
+    value: "true"
   - name: UTCP_CEPH_VERSION
-    value: "tentacle"  # Optional: uses local spec file if available
+    value: tentacle
 
   # Agent model
   - name: EIN_AGENT_MODEL
-    value: "gemini/gemini-2.5-flash-preview-05-20"
+    value: "gemini/gemini-3-flash-preview"
 
   # Alertmanager
   - name: ALERTMANAGER_URL
     value: http://alertmanager.cos.svc.cluster.local:9093
 
 juju:
+  # Gemini API key
   - secret-id: <secret_id1>
+    name: GEMINI_API_KEY
+    key: api-key
+
+  # Kubernetes kubeconfig (base64-encoded) - REQUIRED for K8s
+  - secret-id: <secret_id2>
+    name: UTCP_KUBERNETES_KUBECONFIG_CONTENT
+    key: kubeconfig-content
+
+  # Grafana service account token - REQUIRED for Grafana
+  - secret-id: <secret_id3>
+    name: UTCP_GRAFANA_TOKEN
+    key: token
+```
+
+### Deploy Worker
+
+Deploy the worker with your ROCK image:
+
+```bash
+juju deploy temporal-worker-k8s ein-agent-worker -m temporal \
+  --channel stable \
+  --resource temporal-worker-image=ghcr.io/jneo8/ein-agent-worker:0.1.0 \
+  --config host="temporal-k8s.temporal.svc.cluster.local:7233" \
+  --config namespace=default \
+  --config queue=ein-agent-queue \
+  --config log-level=info
+```
+
+### Grant Secrets and Configure Environment
+
+Grant the secrets to the worker and apply the environment configuration:
+
+```bash
+# Grant all secrets to worker
+juju grant-secret -m temporal gemini-api-key ein-agent-worker
+juju grant-secret -m temporal kubernetes-auth ein-agent-worker
+juju grant-secret -m temporal grafana-auth ein-agent-worker
+
+# Apply environment configuration
+juju config ein-agent-worker -m temporal environment=@./environment.yaml
+```
+
+Wait for the worker to become active:
+
+```bash
+juju status -m temporal ein-agent-worker
 ```
 
 ### UTCP Service Configuration
@@ -188,13 +294,15 @@ UTCP (Universal Tool Calling Protocol) generates tools dynamically from OpenAPI 
 |----------|-------------|
 | `UTCP_SERVICES` | Comma-separated list of services to enable |
 | `UTCP_{SERVICE}_OPENAPI_URL` | URL to the service's OpenAPI spec |
-| `UTCP_{SERVICE}_AUTH_TYPE` | Authentication: `proxy`, `bearer`, `api_key`, `jwt` |
+| `UTCP_{SERVICE}_AUTH_TYPE` | Authentication: `kubeconfig`, `bearer`, `api_key`, `jwt` |
 | `UTCP_{SERVICE}_VERSION` | Optional: spec version (e.g., `1.35`, `tentacle`) |
+| `UTCP_{SERVICE}_ENABLED` | Optional: enable/disable service (default: true) |
+| `UTCP_{SERVICE}_INSECURE` | Optional: skip TLS verification (default: false) |
 
 **Supported Services:**
-- **kubernetes**: Requires kubectl proxy or direct API access
-- **grafana**: Requires Grafana API key
-- **ceph**: Requires Ceph dashboard JWT token
+- **kubernetes**: Requires `kubeconfig` auth (kubeconfig passed via Juju secret)
+- **grafana**: Requires `bearer` auth (service account token via Juju secret)
+- **ceph**: Requires `jwt` auth (Ceph dashboard JWT token)
 
 ### OpenAPI Spec Loading: Local Files vs Live URLs
 

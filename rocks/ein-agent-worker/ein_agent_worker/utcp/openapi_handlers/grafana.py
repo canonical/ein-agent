@@ -15,6 +15,7 @@ class GrafanaOpenApiHandler(OpenApiHandler):
 
     Handles 'grafana_API_KEY_*' variable pattern for bearer token authentication
     and preprocesses OpenAPI specs to force token-based auth (removing basic auth).
+    Grafana uses service account tokens. Supported auth types are defined in config.SERVICE_AUTH_TYPES.
     """
 
     def get_variable_loader(self, token: str) -> Optional[VariableLoader]:
