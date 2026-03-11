@@ -55,7 +55,6 @@ def connect(
         temporal_namespace=temporal_namespace,
         temporal_queue=temporal_queue,
         workflow_id=workflow_id,
-        model=None,
         max_turns=50,
     )
 
