@@ -369,6 +369,7 @@ name = "ein-agent-worker"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "httpx" },
     { name = "litellm" },
     { name = "openai-agents" },
     { name = "pyyaml" },
@@ -384,6 +385,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "litellm", specifier = ">=1.80.0" },
     { name = "openai-agents", specifier = ">=0.5.1" },
     { name = "pyyaml", specifier = ">=6.0.3" },

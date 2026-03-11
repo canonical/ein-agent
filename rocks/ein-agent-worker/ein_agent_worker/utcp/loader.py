@@ -1,7 +1,7 @@
 """UTCP tool loader - generates tools dynamically at runtime from OpenAPI specs.
 
-Tools are created from OpenAPI specification files stored in the specs/ directory.
-Only GET operations are exposed to ensure read-only access.
+Tools are created from OpenAPI specification files (local or live URLs).
+Only GET operations are exposed to ensure read-only access (filtered via handlers).
 """
 
 import base64

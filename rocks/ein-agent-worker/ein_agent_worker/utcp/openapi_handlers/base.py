@@ -48,6 +48,52 @@ class OpenApiHandler(ABC):
     circular imports between config.py and handlers.
     """
 
+    @staticmethod
+    def filter_readonly_operations(spec_data: dict, service_name: str) -> dict:
+        """Filter OpenAPI spec to only include read-only (GET) operations.
+
+        This provides defense-in-depth security by ensuring the AI agent
+        cannot call write operations, even if RBAC permissions are misconfigured.
+
+        Args:
+            spec_data: The parsed OpenAPI spec dictionary.
+            service_name: The service name (for logging).
+
+        Returns:
+            The filtered spec data with only GET operations.
+        """
+        if "paths" not in spec_data:
+            return spec_data
+
+        READ_ONLY_METHODS = {"get"}
+        filtered_paths = {}
+        total_operations = 0
+        filtered_operations = 0
+
+        for path, path_item in spec_data["paths"].items():
+            if not isinstance(path_item, dict):
+                continue
+
+            filtered_path_item = {}
+            for method, operation in path_item.items():
+                total_operations += 1
+                if method.lower() in READ_ONLY_METHODS:
+                    filtered_path_item[method] = operation
+                    filtered_operations += 1
+
+            # Only include paths that have at least one GET operation
+            if filtered_path_item:
+                filtered_paths[path] = filtered_path_item
+
+        spec_data["paths"] = filtered_paths
+        removed_count = total_operations - filtered_operations
+        logger.info(
+            f"[{service_name}] Filtered to read-only operations: "
+            f"kept {filtered_operations} GET operations, removed {removed_count} write operations"
+        )
+
+        return spec_data
+
     @abstractmethod
     def get_variable_loader(self, token: str) -> Optional[VariableLoader]:
         """Create a variable loader for bearer token authentication.

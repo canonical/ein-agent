@@ -3,6 +3,9 @@
 UTCP's default HTTP protocol only allows HTTPS or localhost URLs for security.
 This extended protocol adds support for file:// URLs, enabling loading of
 OpenAPI specs from local files for offline development and testing.
+
+Additionally, this protocol applies security preprocessing (read-only filtering)
+to ALL specs (both file:// and https://) via OpenAPI handlers.
 """
 
 import json
@@ -11,6 +14,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 from urllib.parse import urlparse
 
+import httpx
 import yaml
 from utcp.data.call_template import CallTemplate
 from utcp.data.register_manual_response import RegisterManualResult
@@ -83,6 +87,8 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
     ) -> RegisterManualResult:
         """Register a manual, supporting both HTTP and file:// URLs.
 
+        For all URLs, applies security preprocessing (read-only filtering) via handlers.
+
         Args:
             caller: The UTCP client that is calling this method.
             manual_call_template: The call template of the manual to register.
@@ -101,8 +107,8 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
         if url.startswith("file://"):
             return await self._register_from_file(manual_call_template, url)
 
-        # Delegate to parent for HTTP/HTTPS URLs
-        return await super().register_manual(caller, manual_call_template)
+        # Handle HTTP/HTTPS URLs with preprocessing
+        return await self._register_from_http(caller, manual_call_template, url)
 
     async def _register_from_file(
         self, manual_call_template: HttpCallTemplate, file_url: str
@@ -225,6 +231,94 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
             )
         except Exception as e:
             error_msg = f"Error loading spec from file: {e}"
+            logger.error(error_msg)
+            return RegisterManualResult(
+                success=False,
+                manual_call_template=manual_call_template,
+                manual=UtcpManual(manual_version="0.0.0", tools=[]),
+                errors=[error_msg],
+            )
+
+    async def _register_from_http(
+        self,
+        caller: "UtcpClient",
+        manual_call_template: HttpCallTemplate,
+        http_url: str,
+    ) -> RegisterManualResult:
+        """Load OpenAPI spec from HTTP/HTTPS URL with preprocessing.
+
+        Fetches the spec from a live URL and applies security preprocessing
+        (read-only filtering) before converting to UTCP manual.
+
+        Args:
+            caller: The UTCP client making the request.
+            manual_call_template: The call template containing configuration.
+            http_url: The HTTP/HTTPS URL pointing to the spec.
+
+        Returns:
+            RegisterManualResult with the loaded manual or error details.
+        """
+        try:
+            service_name = manual_call_template.name
+            logger.info(f"[{service_name}] Loading OpenAPI spec from LIVE URL: {http_url}")
+
+            # Fetch spec from URL using httpx (supports async and SSL verification control)
+            async with httpx.AsyncClient(verify=False) as client:  # SSL verification controlled globally
+                response = await client.get(http_url)
+                response.raise_for_status()
+
+                # Parse response
+                content_type = response.headers.get("content-type", "")
+                if "yaml" in content_type or http_url.endswith((".yaml", ".yml")):
+                    spec_data = yaml.safe_load(response.text)
+                else:
+                    spec_data = response.json()
+
+            # Apply service-specific preprocessing via handler (including read-only filtering)
+            handler = self.openapi_handlers.get(
+                service_name, DefaultOpenApiHandler(service_name)
+            )
+            spec_data = handler.preprocess_spec(spec_data, service_name)
+
+            # Convert OpenAPI spec to UTCP manual
+            logger.info(
+                f"[{service_name}] Converting OpenAPI spec to UTCP manual (from live URL)"
+            )
+            converter = OpenApiConverter(
+                spec_data,
+                spec_url=http_url,
+                call_template_name=manual_call_template.name,
+                auth_tools=manual_call_template.auth_tools,
+            )
+            utcp_manual = converter.convert()
+
+            return RegisterManualResult(
+                success=True,
+                manual_call_template=manual_call_template,
+                manual=utcp_manual,
+                errors=[],
+            )
+
+        except httpx.HTTPStatusError as e:
+            error_msg = f"HTTP error fetching spec from {http_url}: {e.response.status_code}"
+            logger.error(error_msg)
+            return RegisterManualResult(
+                success=False,
+                manual_call_template=manual_call_template,
+                manual=UtcpManual(manual_version="0.0.0", tools=[]),
+                errors=[error_msg],
+            )
+        except (json.JSONDecodeError, yaml.YAMLError) as e:
+            error_msg = f"Error parsing spec from {http_url}: {e}"
+            logger.error(error_msg)
+            return RegisterManualResult(
+                success=False,
+                manual_call_template=manual_call_template,
+                manual=UtcpManual(manual_version="0.0.0", tools=[]),
+                errors=[error_msg],
+            )
+        except Exception as e:
+            error_msg = f"Error loading spec from {http_url}: {e}"
             logger.error(error_msg)
             return RegisterManualResult(
                 success=False,

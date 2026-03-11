@@ -26,10 +26,11 @@ class GrafanaOpenApiHandler(OpenApiHandler):
         )
 
     def preprocess_spec(self, spec_data: dict, service_name: str) -> dict:
-        """Force api_key security and remove basic auth from Grafana specs.
+        """Force api_key security, remove basic auth, and filter to read-only operations.
 
         We use service account tokens, not username/password, so basic auth
-        definitions are removed from the spec.
+        definitions are removed from the spec. Then filter to only GET operations
+        for security.
         """
         if "security" in spec_data:
             spec_data["security"] = [{"api_key": []}]
@@ -39,7 +40,8 @@ class GrafanaOpenApiHandler(OpenApiHandler):
             del spec_data["securityDefinitions"]["basic"]
             logger.info(f"[{service_name}] Removed basic auth from security definitions")
 
-        return spec_data
+        # Filter to read-only operations
+        return self.filter_readonly_operations(spec_data, service_name)
 
     def get_api_key_pattern(self) -> str:
         """Return Grafana API key pattern."""

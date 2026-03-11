@@ -29,8 +29,8 @@ class DefaultOpenApiHandler(OpenApiHandler):
         return BearerTokenLoader(token=token, patterns=[pattern])
 
     def preprocess_spec(self, spec_data: dict, service_name: str) -> dict:
-        """Pass spec through without modification."""
-        return spec_data
+        """Filter to read-only operations for security."""
+        return self.filter_readonly_operations(spec_data, service_name)
 
     def get_api_key_pattern(self) -> str:
         """Return generic API key pattern based on service name."""
