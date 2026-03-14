@@ -52,15 +52,15 @@ You are the Investigation Assistant (The Orchestrator).
 - **Direct Infrastructure Access**: You have UTCP tools to query infrastructure directly:
   - **Kubernetes**: Use `search_kubernetes_operations`, \
 `get_kubernetes_operation_details`, `call_kubernetes_operation`
-  - **Grafana**: Use `search_grafana_operations`, \
-`get_grafana_operation_details`, `call_grafana_operation`
   - **Ceph** (if enabled): Use `search_ceph_operations`, \
 `get_ceph_operation_details`, `call_ceph_operation`
 - **Consult Domain Specialists**: For deep technical investigations, hand off to specialists:
-  - **ComputeSpecialist**: For complex Kubernetes/Grafana investigations \
+  - **ComputeSpecialist**: For complex Kubernetes compute investigations \
 requiring domain expertise.
   - **StorageSpecialist**: For complex Ceph/storage investigations requiring domain expertise.
   - **NetworkSpecialist**: For complex networking investigations requiring domain expertise.
+  - **ObservabilitySpecialist**: For querying Grafana dashboards, Prometheus metrics, \
+and Loki logs. Delegate ALL observability queries to this specialist.
 - **Shared Context**: Use `get_shared_context`, `update_shared_context`, \
 and `group_findings` to manage investigation findings.
 - **Ask User**: Ask for clarification or provide updates using `ask_user`.
@@ -71,25 +71,31 @@ formatted summary of all investigation findings.
 1. **Analyze User Request**: Determine if the user wants to investigate a \
 specific alert or has a general infrastructure question.
 2. **Answer Simple Queries Directly**: For straightforward requests, use UTCP tools directly:
-   - "list grafana dashboards" -> Use `search_grafana_operations` + `call_grafana_operation`
    - "show kubernetes pods" -> Use `search_kubernetes_operations` + `call_kubernetes_operation`
    - "check ceph health" -> Use `search_ceph_operations` + `call_ceph_operation`
-3. **Delegate Complex Investigations**: For multi-step investigations \
+3. **Delegate Observability Queries**: For ANY Grafana, Prometheus, or Loki queries, \
+hand off to ObservabilitySpecialist:
+   - "list grafana dashboards" -> Delegate to ObservabilitySpecialist
+   - "query prometheus metrics" -> Delegate to ObservabilitySpecialist
+   - "search loki logs" -> Delegate to ObservabilitySpecialist
+4. **Delegate Complex Investigations**: For multi-step investigations \
 requiring domain expertise, hand off to specialists:
    - Example: "investigate why storage is slow" -> Delegate to StorageSpecialist
-4. **Synthesize & Group**: As findings accumulate, use `group_findings` \
+5. **Synthesize & Group**: As findings accumulate, use `group_findings` \
 to consolidate related findings.
-5. **Report**: Use `print_findings_report` to show the current status.
-6. **Ongoing Support**: You are an always-on assistant. Do not close the \
+6. **Report**: Use `print_findings_report` to show the current status.
+7. **Ongoing Support**: You are an always-on assistant. Do not close the \
 session unless the user explicitly asks to stop.
 
 ## CRITICAL RULES
-- **USE UTCP TOOLS DIRECTLY**: For simple queries (list, show, get), \
+- **USE UTCP TOOLS DIRECTLY**: For simple Kubernetes/Ceph queries (list, show, get), \
 use your UTCP tools directly. No need to delegate.
+- **ALWAYS DELEGATE OBSERVABILITY**: Grafana, Prometheus, and Loki queries must \
+go through the ObservabilitySpecialist.
 - **DELEGATE FOR DEEP ANALYSIS**: Only hand off to specialists for complex \
 investigations requiring domain expertise.
 - **HANDOFFS**: Use the standard transfer tools to delegate \
-(e.g., `transfer_to_computespecialist`).
+(e.g., `transfer_to_computespecialist`, `transfer_to_observabilityspecialist`).
 - **OUTPUTTING REPORTS**: Always output the content of `print_findings_report` to the user.
 """
 
@@ -103,6 +109,7 @@ class HumanInTheLoopWorkflow:
         'ComputeSpecialist',
         'StorageSpecialist',
         'NetworkSpecialist',
+        'ObservabilitySpecialist',
     ]
 
     def __init__(self):
@@ -587,6 +594,17 @@ class HumanInTheLoopWorkflow:
             tools=[net_update, net_get, net_print, net_group, *network_utcp_tools],
         )
 
+        # Create tools for ObservabilitySpecialist (shared context + UTCP tools)
+        obs_update, obs_get, obs_print, obs_group = create_shared_context_tools(
+            self._shared_context, agent_name='ObservabilitySpecialist'
+        )
+        observability_utcp_tools = self._get_domain_utcp_tools(DomainType.OBSERVABILITY)
+        observability_spec = new_specialist_agent(
+            domain=DomainType.OBSERVABILITY,
+            model=self._config.model,
+            tools=[obs_update, obs_get, obs_print, obs_group, *observability_utcp_tools],
+        )
+
         # Create tools
         ask_user_tool = self._create_ask_user_tool()
         fetch_alerts_tool = self._create_fetch_alerts_tool()
@@ -605,13 +623,14 @@ class HumanInTheLoopWorkflow:
                 group_tool,
                 *all_utcp_tools,  # Add all UTCP tools for direct access
             ],
-            handoffs=[compute_spec, storage_spec, network_spec],
+            handoffs=[compute_spec, storage_spec, network_spec, observability_spec],
         )
 
         # Wire back-handoffs
         compute_spec.handoffs = [agent]
         storage_spec.handoffs = [agent]
         network_spec.handoffs = [agent]
+        observability_spec.handoffs = [agent]
 
         return agent
 
