@@ -263,9 +263,21 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
                 http_url,
             )
 
+            # Extract auth headers from call template for spec fetching
+            # (e.g., Kubernetes API requires auth even for /openapi/v2)
+            headers: dict[str, str] = {}
+            auth = manual_call_template.auth
+            if auth and auth.auth_type == 'api_key' and auth.location == 'header':
+                headers[auth.var_name] = auth.api_key
+                logger.info(
+                    '[%s] Using %s header for spec fetch',
+                    service_name,
+                    auth.var_name,
+                )
+
             # Fetch spec from URL using httpx
             async with httpx.AsyncClient(verify=False) as client:  # noqa: S501
-                response = await client.get(http_url)
+                response = await client.get(http_url, headers=headers)
                 response.raise_for_status()
 
                 # Parse response
