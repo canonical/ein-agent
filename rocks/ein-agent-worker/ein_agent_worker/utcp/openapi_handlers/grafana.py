@@ -46,3 +46,15 @@ class GrafanaOpenApiHandler(OpenApiHandler):
     def get_api_key_pattern(self) -> str:
         """Return Grafana API key pattern."""
         return r"grafana_API_KEY_\d+"
+
+    def resolve_server_url(self, spec_data: dict, api_base_url: str, service_name: str) -> str:
+        """Grafana Swagger 2.0 spec has basePath=/api — combine with api_base_url."""
+        base_path = spec_data.get('basePath', '')
+        if base_path:
+            resolved = f"{api_base_url.rstrip('/')}{base_path}"
+            logger.info(
+                f"[{service_name}] Resolved server URL: {resolved} (api_base_url + basePath)"
+            )
+            return resolved
+        logger.info(f"[{service_name}] Resolved server URL: {api_base_url}")
+        return api_base_url

@@ -35,3 +35,30 @@ class DefaultOpenApiHandler(OpenApiHandler):
     def get_api_key_pattern(self) -> str:
         """Return generic API key pattern based on service name."""
         return rf"{self._service_name}_API_KEY_\d+"
+
+    def resolve_server_url(self, spec_data: dict, api_base_url: str, service_name: str) -> str:
+        """Resolve server URL for generic services.
+
+        Handles both Swagger 2.0 (basePath) and OpenAPI 3.x (servers with
+        relative URLs) specs.
+        """
+        # Swagger 2.0: basePath
+        if 'basePath' in spec_data:
+            resolved = f"{api_base_url.rstrip('/')}{spec_data['basePath']}"
+            logger.info(
+                f"[{service_name}] Resolved server URL: {resolved} (api_base_url + basePath)"
+            )
+            return resolved
+
+        # OpenAPI 3.x: relative servers[0].url
+        if 'servers' in spec_data and spec_data['servers']:
+            original_server_url = spec_data['servers'][0].get('url', '')
+            if original_server_url and not original_server_url.startswith('http'):
+                resolved = f"{api_base_url.rstrip('/')}{original_server_url}"
+                logger.info(
+                    f"[{service_name}] Resolved server URL: {resolved} (api_base_url + servers[0].url)"
+                )
+                return resolved
+
+        logger.info(f"[{service_name}] Resolved server URL: {api_base_url}")
+        return api_base_url

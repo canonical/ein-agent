@@ -9,7 +9,7 @@ export GEMINI_API_KEY="${GEMINI_API_KEY:-your-gemini-api-key-here}"
 # =============================================================================
 # See CLAUDE.md for instructions on setting up Kubernetes ServiceAccount and token
 
-export UTCP_SERVICES="kubernetes,grafana"
+export UTCP_SERVICES="kubernetes,grafana,prometheus"
 
 # Kubernetes UTCP Configuration (kubeconfig-based authentication)
 # NOTE: Kubernetes ONLY supports kubeconfig auth (no bearer token support)
@@ -28,6 +28,13 @@ export UTCP_GRAFANA_TOKEN="${UTCP_GRAFANA_TOKEN:-your-grafana-token-here}"
 export UTCP_GRAFANA_INSECURE="true"
 export UTCP_GRAFANA_ENABLED="true"
 export UTCP_GRAFANA_VERSION="12"
+
+# Prometheus UTCP Configuration (no authentication required)
+export UTCP_PROMETHEUS_OPENAPI_URL="${UTCP_PROMETHEUS_OPENAPI_URL:-http://your-prometheus-url}"
+export UTCP_PROMETHEUS_AUTH_TYPE="none"
+export UTCP_PROMETHEUS_INSECURE="true"
+export UTCP_PROMETHEUS_ENABLED="true"
+export UTCP_PROMETHEUS_VERSION="3.5.0"
 
 # =============================================================================
 # Temporal Configuration

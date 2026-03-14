@@ -23,9 +23,9 @@ class DomainType(str, Enum):
 # =============================================================================
 # Which UTCP services are relevant for each domain
 DOMAIN_UTCP_SERVICES: dict[DomainType, Set[str]] = {
-    DomainType.COMPUTE: {"kubernetes", "grafana"},
-    DomainType.STORAGE: {"ceph", "kubernetes"},  # kubernetes for PVC access
-    DomainType.NETWORK: {"kubernetes"},
+    DomainType.COMPUTE: {"kubernetes", "grafana", "prometheus"},
+    DomainType.STORAGE: {"ceph", "kubernetes", "prometheus"},  # kubernetes for PVC access
+    DomainType.NETWORK: {"kubernetes", "prometheus"},
 }
 
 

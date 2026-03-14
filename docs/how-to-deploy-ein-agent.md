@@ -189,7 +189,7 @@ Create an `environment.yaml` file with your configuration:
 env:
   # UTCP Service Configuration
   - name: UTCP_SERVICES
-    value: kubernetes,grafana,ceph
+    value: kubernetes,grafana,ceph,prometheus
 
   # Kubernetes UTCP Configuration
   # NOTE: Kubernetes ONLY supports kubeconfig auth (no bearer token support)
@@ -226,6 +226,17 @@ env:
     value: "true"
   - name: UTCP_CEPH_VERSION
     value: tentacle
+
+  # Prometheus UTCP Configuration
+  # NOTE: Prometheus typically requires no authentication when accessed via COS proxy
+  - name: UTCP_PROMETHEUS_OPENAPI_URL
+    value: http://prometheus.cos.svc.cluster.local:9090
+  - name: UTCP_PROMETHEUS_AUTH_TYPE
+    value: none  # No authentication required
+  - name: UTCP_PROMETHEUS_ENABLED
+    value: "true"
+  - name: UTCP_PROMETHEUS_VERSION
+    value: "3.5.0"
 
   # Agent model
   - name: EIN_AGENT_MODEL
@@ -294,7 +305,7 @@ UTCP (Universal Tool Calling Protocol) generates tools dynamically from OpenAPI 
 |----------|-------------|
 | `UTCP_SERVICES` | Comma-separated list of services to enable |
 | `UTCP_{SERVICE}_OPENAPI_URL` | URL to the service's OpenAPI spec |
-| `UTCP_{SERVICE}_AUTH_TYPE` | Authentication: `kubeconfig`, `bearer`, `api_key`, `jwt` |
+| `UTCP_{SERVICE}_AUTH_TYPE` | Authentication: `kubeconfig`, `bearer`, `api_key`, `jwt`, `none` |
 | `UTCP_{SERVICE}_VERSION` | Optional: spec version (e.g., `1.35`, `tentacle`) |
 | `UTCP_{SERVICE}_ENABLED` | Optional: enable/disable service (default: true) |
 | `UTCP_{SERVICE}_INSECURE` | Optional: skip TLS verification (default: false) |
@@ -303,6 +314,7 @@ UTCP (Universal Tool Calling Protocol) generates tools dynamically from OpenAPI 
 - **kubernetes**: Requires `kubeconfig` auth (kubeconfig passed via Juju secret)
 - **grafana**: Requires `bearer` auth (service account token via Juju secret)
 - **ceph**: Requires `jwt` auth (Ceph dashboard JWT token)
+- **prometheus**: Supports `none` auth (no token needed when accessed via COS proxy) or `bearer` auth
 
 ### OpenAPI Spec Loading: Local Files vs Live URLs
 

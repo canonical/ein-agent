@@ -38,3 +38,8 @@ class KubernetesOpenApiHandler(OpenApiHandler):
     def get_api_key_pattern(self) -> str:
         """Return Kubernetes API key patterns."""
         return r"(k8s|kubernetes)_API_KEY_\d+"
+
+    def resolve_server_url(self, spec_data: dict, api_base_url: str, service_name: str) -> str:
+        """Kubernetes Swagger 2.0 spec has no basePath — use api_base_url directly."""
+        logger.info(f"[{service_name}] Resolved server URL: {api_base_url}")
+        return api_base_url

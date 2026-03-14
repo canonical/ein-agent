@@ -56,14 +56,18 @@ SPECS_DIR := specs
 K8S_VERSION ?= 1.35
 CEPH_VERSION ?= tentacle
 GRAFANA_VERSION ?= 12
+# Prometheus OpenAPI spec is generated at build time (PR #17825), pinned to merge commit on main
+PROMETHEUS_COMMIT ?= 75f94903b36d11b7b47dc3e0ebabab1ce3acabc7
+PROMETHEUS_VERSION ?= 3.5.0
 
 # Source URL templates
 K8S_OPENAPI_URL = https://raw.githubusercontent.com/kubernetes/kubernetes/release-$(K8S_VERSION)/api/openapi-spec/swagger.json
 CEPH_OPENAPI_URL = https://raw.githubusercontent.com/ceph/ceph/$(CEPH_VERSION)/src/pybind/mgr/dashboard/openapi.yaml
 GRAFANA_OPENAPI_URL = https://raw.githubusercontent.com/grafana/grafana/v$(GRAFANA_VERSION).0.0/public/api-merged.json
+PROMETHEUS_OPENAPI_URL = https://raw.githubusercontent.com/prometheus/prometheus/$(PROMETHEUS_COMMIT)/web/api/v1/testdata/openapi_3.1_golden.yaml
 
 .PHONY: download-openapi-specs
-download-openapi-specs: download-k8s-spec download-ceph-spec download-grafana-spec  ## Download all OpenAPI specs
+download-openapi-specs: download-k8s-spec download-ceph-spec download-grafana-spec download-prometheus-spec  ## Download all OpenAPI specs
 	@echo "All OpenAPI specs downloaded to $(SPECS_DIR)/"
 
 .PHONY: download-k8s-spec
@@ -83,6 +87,12 @@ download-grafana-spec:  ## Download Grafana OpenAPI spec (GRAFANA_VERSION=12)
 	@mkdir -p $(SPECS_DIR)/grafana
 	@echo "Downloading Grafana v$(GRAFANA_VERSION) OpenAPI spec..."
 	curl -L -o $(SPECS_DIR)/grafana/$(GRAFANA_VERSION).json $(GRAFANA_OPENAPI_URL)
+
+.PHONY: download-prometheus-spec
+download-prometheus-spec:  ## Download Prometheus OpenAPI spec (PROMETHEUS_VERSION=3.5.0)
+	@mkdir -p $(SPECS_DIR)/prometheus
+	@echo "Downloading Prometheus $(PROMETHEUS_VERSION) OpenAPI spec..."
+	curl -L -o $(SPECS_DIR)/prometheus/$(PROMETHEUS_VERSION).yaml $(PROMETHEUS_OPENAPI_URL)
 
 ##@ Help
 

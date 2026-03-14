@@ -128,3 +128,19 @@ class OpenApiHandler(ABC):
             A regex pattern string that matches API key variable names
             for this service (e.g., r"kubernetes_API_KEY_\\d+").
         """
+
+    @abstractmethod
+    def resolve_server_url(self, spec_data: dict, api_base_url: str, service_name: str) -> str:
+        """Resolve the final server URL for API calls.
+
+        Each service handler implements its own logic for combining the
+        configured api_base_url with path information from the OpenAPI spec.
+
+        Args:
+            spec_data: The parsed OpenAPI spec dictionary.
+            api_base_url: The configured API base URL (e.g., 'http://10.x.x.x/cos-prometheus-0').
+            service_name: The service name (for logging).
+
+        Returns:
+            The resolved server URL to use for API calls.
+        """

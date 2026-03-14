@@ -168,23 +168,10 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
                 if api_base_url:
                     parsed = urlparse(api_base_url)
 
-                    # OpenApiConverter prioritizes 'servers' over spec_url
-                    # Set servers to include the full base URL with path prefix
-                    # This ensures URLs are constructed correctly for services deployed at subpaths
-                    if 'basePath' in spec_data:
-                        # For OpenAPI 2.0: Combine api_base_url with basePath
-                        # Example: https://10.100.100.12/cos-grafana + /api = https://10.100.100.12/cos-grafana/api
-                        base_url_with_base_path = f"{api_base_url}{spec_data['basePath']}"
-                        spec_data['servers'] = [{'url': base_url_with_base_path}]
-                        logger.info(
-                            f"[{service_name}] Set servers[0].url: {base_url_with_base_path} (api_base_url + basePath)"
-                        )
-                    else:
-                        # No basePath, use api_base_url directly
-                        spec_data['servers'] = [{'url': api_base_url}]
-                        logger.info(
-                            f"[{service_name}] Set servers[0].url: {api_base_url}"
-                        )
+                    # Delegate URL resolution to the handler (supports Swagger 2.0 basePath
+                    # and OpenAPI 3.x servers with relative URLs)
+                    resolved_url = handler.resolve_server_url(spec_data, api_base_url, service_name)
+                    spec_data['servers'] = [{'url': resolved_url}]
 
                     # Set host and scheme for fallback (in case servers is not used)
                     spec_data['host'] = parsed.netloc

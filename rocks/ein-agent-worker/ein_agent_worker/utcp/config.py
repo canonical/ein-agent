@@ -99,11 +99,21 @@ class GrafanaVersion(str, Enum):
         return cls.V12
 
 
+class PrometheusVersion(str, Enum):
+    """Supported Prometheus versions."""
+    V3_5_0 = "3.5.0"
+
+    @classmethod
+    def default(cls) -> "PrometheusVersion":
+        return cls.V3_5_0
+
+
 # Mapping of service names to their version enums
 SUPPORTED_VERSIONS = {
     "kubernetes": KubernetesVersion,
     "ceph": CephVersion,
     "grafana": GrafanaVersion,
+    "prometheus": PrometheusVersion,
 }
 
 # Default versions for each service
@@ -111,6 +121,7 @@ DEFAULT_VERSIONS: dict[str, str] = {
     "kubernetes": KubernetesVersion.default().value,
     "ceph": CephVersion.default().value,
     "grafana": GrafanaVersion.default().value,
+    "prometheus": PrometheusVersion.default().value,
 }
 
 
@@ -123,6 +134,7 @@ DEFAULT_VERSIONS: dict[str, str] = {
 SERVICE_AUTH_TYPES: dict[str, tuple[str, ...]] = {
     "kubernetes": ("kubeconfig",),
     "grafana": ("bearer",),
+    "prometheus": ("none", "bearer"),
     # Default for other services
     "_default": ("proxy", "bearer", "api_key", "jwt"),
 }

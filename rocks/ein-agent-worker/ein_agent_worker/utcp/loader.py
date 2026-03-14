@@ -466,6 +466,10 @@ class ToolLoader:
 
             logger.info(f"[{service_name}] Using bearer token from environment")
 
+        elif auth_type == "none":
+            # NO AUTH: Service requires no authentication (e.g., Prometheus behind proxy)
+            logger.info(f"[{service_name}] No authentication configured (auth_type=none)")
+
         # Configure bearer auth (unified for both kubeconfig-extracted and direct tokens)
         if bearer_token:
             call_template["auth"] = {
