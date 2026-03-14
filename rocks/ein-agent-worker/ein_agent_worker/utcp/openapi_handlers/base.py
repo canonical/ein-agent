@@ -8,7 +8,6 @@ spec preprocessing before conversion to UTCP manuals.
 import logging
 import re
 from abc import ABC, abstractmethod
-from typing import Optional
 
 from utcp.data.variable_loader import VariableLoader
 
@@ -23,18 +22,18 @@ class BearerTokenLoader(VariableLoader):
     for service-specific loader classes.
     """
 
-    variable_loader_type: str = "bearer"
+    variable_loader_type: str = 'bearer'
     token: str
     patterns: list[str]
 
     def __init__(self, token: str, patterns: list[str], **kwargs):
         super().__init__(token=token, patterns=patterns, **kwargs)
 
-    def get(self, key: str) -> Optional[str]:
+    def get(self, key: str) -> str | None:
         """Return bearer token if key matches any configured pattern."""
         for pattern in self.patterns:
             if re.match(pattern, key):
-                return f"Bearer {self.token}"
+                return f'Bearer {self.token}'
         return None
 
 
@@ -62,22 +61,22 @@ class OpenApiHandler(ABC):
         Returns:
             The filtered spec data with only GET operations.
         """
-        if "paths" not in spec_data:
+        if 'paths' not in spec_data:
             return spec_data
 
-        READ_ONLY_METHODS = {"get"}
+        read_only_methods = {'get'}
         filtered_paths = {}
         total_operations = 0
         filtered_operations = 0
 
-        for path, path_item in spec_data["paths"].items():
+        for path, path_item in spec_data['paths'].items():
             if not isinstance(path_item, dict):
                 continue
 
             filtered_path_item = {}
             for method, operation in path_item.items():
                 total_operations += 1
-                if method.lower() in READ_ONLY_METHODS:
+                if method.lower() in read_only_methods:
                     filtered_path_item[method] = operation
                     filtered_operations += 1
 
@@ -85,17 +84,20 @@ class OpenApiHandler(ABC):
             if filtered_path_item:
                 filtered_paths[path] = filtered_path_item
 
-        spec_data["paths"] = filtered_paths
+        spec_data['paths'] = filtered_paths
         removed_count = total_operations - filtered_operations
         logger.info(
-            f"[{service_name}] Filtered to read-only operations: "
-            f"kept {filtered_operations} GET operations, removed {removed_count} write operations"
+            '[%s] Filtered to read-only operations: '
+            'kept %d GET operations, removed %d write operations',
+            service_name,
+            filtered_operations,
+            removed_count,
         )
 
         return spec_data
 
     @abstractmethod
-    def get_variable_loader(self, token: str) -> Optional[VariableLoader]:
+    def get_variable_loader(self, token: str) -> VariableLoader | None:
         """Create a variable loader for bearer token authentication.
 
         Args:
@@ -122,7 +124,7 @@ class OpenApiHandler(ABC):
 
     @abstractmethod
     def get_api_key_pattern(self) -> str:
-        """Return regex pattern for API key variable matching.
+        r"""Return regex pattern for API key variable matching.
 
         Returns:
             A regex pattern string that matches API key variable names
@@ -138,7 +140,7 @@ class OpenApiHandler(ABC):
 
         Args:
             spec_data: The parsed OpenAPI spec dictionary.
-            api_base_url: The configured API base URL (e.g., 'http://10.x.x.x/cos-prometheus-0').
+            api_base_url: The configured API base URL.
             service_name: The service name (for logging).
 
         Returns:

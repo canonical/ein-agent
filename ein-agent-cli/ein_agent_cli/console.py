@@ -1,6 +1,5 @@
 """Console output utilities with color formatting."""
 
-from typing import Optional
 from rich.console import Console
 from rich.panel import Panel
 
@@ -8,7 +7,7 @@ from rich.panel import Panel
 _console = Console()
 
 
-def print_message(message: str, color: Optional[str] = None, style: Optional[str] = None) -> None:
+def print_message(message: str, color: str | None = None, style: str | None = None) -> None:
     """Print a message with optional color and style.
 
     Args:
@@ -22,13 +21,13 @@ def print_message(message: str, color: Optional[str] = None, style: Optional[str
             parts.append(style)
         if color:
             parts.append(color)
-        markup = " ".join(parts)
-        _console.print(f"[{markup}]{message}[/{markup}]")
+        markup = ' '.join(parts)
+        _console.print(f'[{markup}]{message}[/{markup}]')
     else:
         _console.print(message)
 
 
-def print_panel(content: str, title: Optional[str] = None, border_style: str = "blue") -> None:
+def print_panel(content: str, title: str | None = None, border_style: str = 'blue') -> None:
     """Print a panel with content.
 
     Args:
@@ -41,37 +40,37 @@ def print_panel(content: str, title: Optional[str] = None, border_style: str = "
 
 def print_dim(message: str) -> None:
     """Print a dim/debug message."""
-    _console.print(f"[dim]{message}[/dim]")
+    _console.print(f'[dim]{message}[/dim]')
 
 
 def print_success(message: str) -> None:
     """Print a success message in green."""
-    _console.print(f"[green]{message}[/green]")
+    _console.print(f'[green]{message}[/green]')
 
 
 def print_warning(message: str) -> None:
     """Print a warning message in yellow."""
-    _console.print(f"[yellow]{message}[/yellow]")
+    _console.print(f'[yellow]{message}[/yellow]')
 
 
 def print_error(message: str) -> None:
     """Print an error message in red."""
-    _console.print(f"[red]{message}[/red]")
+    _console.print(f'[red]{message}[/red]')
 
 
 def print_info(message: str) -> None:
     """Print an info message in cyan."""
-    _console.print(f"[cyan]{message}[/cyan]")
+    _console.print(f'[cyan]{message}[/cyan]')
 
 
 def print_header(message: str) -> None:
     """Print a header message in bold cyan."""
-    _console.print(f"[bold cyan]{message}[/bold cyan]")
+    _console.print(f'[bold cyan]{message}[/bold cyan]')
 
 
 def print_bold_success(message: str) -> None:
     """Print a bold success message in bold green."""
-    _console.print(f"[bold green]{message}[/bold green]")
+    _console.print(f'[bold green]{message}[/bold green]')
 
 
 def print_table(table) -> None:

@@ -1,7 +1,7 @@
 """Data models for investigation using Pydantic."""
 
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -19,25 +19,23 @@ class SharedFinding(BaseModel):
     """
 
     key: str = Field(..., description="Resource identifier (e.g., 'host:compute-01')")
-    value: str = Field(..., description="The observed status or identified issue")
-    confidence: float = Field(
-        ...,
-        ge=0.0,
-        le=1.0,
-        description="Certainty level (0.0 - 1.0)"
-    )
-    agent_name: str = Field(..., description="Name of the agent that recorded this")
-    timestamp: Optional[datetime] = Field(default=None, description="When recorded (set by workflow)")
-    metadata: Dict[str, Any] = Field(default_factory=dict)
+    value: str = Field(..., description='The observed status or identified issue')
+    confidence: float = Field(..., ge=0.0, le=1.0, description='Certainty level (0.0 - 1.0)')
+    agent_name: str = Field(..., description='Name of the agent that recorded this')
+    timestamp: datetime | None = Field(default=None, description='When recorded (set by workflow)')
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class InvestigationGroup(BaseModel):
     """A grouping of related findings representing a specific incident or root cause."""
+
     name: str = Field(..., description="Name of the group (e.g., 'Ceph Cluster Failure')")
-    finding_indices: List[int] = Field(..., description="Indices of findings in this group (0-based)")
-    analysis: str = Field(..., description="Analysis of how these findings are related")
-    agent_name: str = Field(..., description="Name of the agent creating the group")
-    timestamp: Optional[datetime] = Field(default=None, description="When created")
+    finding_indices: list[int] = Field(
+        ..., description='Indices of findings in this group (0-based)'
+    )
+    analysis: str = Field(..., description='Analysis of how these findings are related')
+    agent_name: str = Field(..., description='Name of the agent creating the group')
+    timestamp: datetime | None = Field(default=None, description='When created')
 
 
 class SharedContext(BaseModel):
@@ -48,8 +46,8 @@ class SharedContext(BaseModel):
     correlation and prevents redundant investigations.
     """
 
-    findings: List[SharedFinding] = Field(default_factory=list)
-    groups: List[InvestigationGroup] = Field(default_factory=list)
+    findings: list[SharedFinding] = Field(default_factory=list)
+    groups: list[InvestigationGroup] = Field(default_factory=list)
 
     def add_finding(
         self,
@@ -57,8 +55,8 @@ class SharedContext(BaseModel):
         value: str,
         confidence: float,
         agent_name: str,
-        metadata: Optional[Dict[str, Any]] = None,
-        timestamp: Optional[datetime] = None
+        metadata: dict[str, Any] | None = None,
+        timestamp: datetime | None = None,
     ) -> SharedFinding:
         """Add a new finding to the shared context.
 
@@ -79,7 +77,7 @@ class SharedContext(BaseModel):
             confidence=confidence,
             agent_name=agent_name,
             metadata=metadata or {},
-            timestamp=timestamp
+            timestamp=timestamp,
         )
         self.findings.append(finding)
         return finding
@@ -87,10 +85,10 @@ class SharedContext(BaseModel):
     def add_group(
         self,
         name: str,
-        finding_indices: List[int],
+        finding_indices: list[int],
         analysis: str,
         agent_name: str,
-        timestamp: Optional[datetime] = None
+        timestamp: datetime | None = None,
     ) -> InvestigationGroup:
         """Add a new group of findings.
 
@@ -109,16 +107,14 @@ class SharedContext(BaseModel):
             finding_indices=finding_indices,
             analysis=analysis,
             agent_name=agent_name,
-            timestamp=timestamp
+            timestamp=timestamp,
         )
         self.groups.append(group)
         return group
 
     def get_findings(
-        self,
-        filter_key: Optional[str] = None,
-        min_confidence: float = 0.0
-    ) -> List[SharedFinding]:
+        self, filter_key: str | None = None, min_confidence: float = 0.0
+    ) -> list[SharedFinding]:
         """Retrieve findings from the shared context.
 
         Args:
@@ -132,13 +128,16 @@ class SharedContext(BaseModel):
         for finding in self.findings:
             if min_confidence > 0 and finding.confidence < min_confidence:
                 continue
-            if filter_key:
-                if not finding.key.startswith(filter_key) and filter_key not in finding.key:
-                    continue
+            if (
+                filter_key
+                and not finding.key.startswith(filter_key)
+                and filter_key not in finding.key
+            ):
+                continue
             results.append(finding)
         return results
 
-    def get_high_confidence_root_causes(self, threshold: float = 0.8) -> List[SharedFinding]:
+    def get_high_confidence_root_causes(self, threshold: float = 0.8) -> list[SharedFinding]:
         """Get findings that likely represent root causes.
 
         Args:
@@ -172,12 +171,12 @@ class SharedContext(BaseModel):
             Formatted string of all findings
         """
         if not self.findings:
-            return "No findings recorded yet."
+            return 'No findings recorded yet.'
 
-        lines = ["=== Shared Context Findings ==="]
+        lines = ['=== Shared Context Findings ===']
         for i, finding in enumerate(self.findings, 1):
             lines.append(
-                f"{i}. [{finding.agent_name}] {finding.key}: {finding.value} "
-                f"(confidence: {finding.confidence:.2f})"
+                f'{i}. [{finding.agent_name}] {finding.key}: {finding.value} '
+                f'(confidence: {finding.confidence:.2f})'
             )
-        return "\n".join(lines)
+        return '\n'.join(lines)

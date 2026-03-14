@@ -13,15 +13,15 @@ from ein_agent_worker.utcp.openapi_handlers.kubernetes import KubernetesOpenApiH
 # Registry of OpenAPI handlers keyed by service name.
 # Services not in this registry will use DefaultOpenApiHandler.
 DEFAULT_OPENAPI_HANDLERS: dict[str, OpenApiHandler] = {
-    "kubernetes": KubernetesOpenApiHandler(),
-    "grafana": GrafanaOpenApiHandler(),
+    'kubernetes': KubernetesOpenApiHandler(),
+    'grafana': GrafanaOpenApiHandler(),
 }
 
 __all__ = [
-    "BearerTokenLoader",
-    "OpenApiHandler",
-    "DefaultOpenApiHandler",
-    "GrafanaOpenApiHandler",
-    "KubernetesOpenApiHandler",
-    "DEFAULT_OPENAPI_HANDLERS",
+    'DEFAULT_OPENAPI_HANDLERS',
+    'BearerTokenLoader',
+    'DefaultOpenApiHandler',
+    'GrafanaOpenApiHandler',
+    'KubernetesOpenApiHandler',
+    'OpenApiHandler',
 ]

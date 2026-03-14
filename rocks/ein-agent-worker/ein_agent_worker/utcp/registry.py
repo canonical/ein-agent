@@ -11,10 +11,9 @@ This pattern:
 """
 
 import logging
-from typing import Optional
 
-from utcp.utcp_client import UtcpClient
 from ein_agent_worker.utcp.config import UTCPServiceConfig
+from utcp.utcp_client import UtcpClient
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +25,7 @@ _service_configs: dict[str, UTCPServiceConfig] = {}
 
 
 def register_client(
-    service_name: str,
-    client: UtcpClient,
-    config: Optional[UTCPServiceConfig] = None
+    service_name: str, client: UtcpClient, config: UTCPServiceConfig | None = None
 ) -> None:
     """Register a pre-initialized UTCP client.
 
@@ -40,10 +37,10 @@ def register_client(
     _utcp_clients[service_name] = client
     if config:
         _service_configs[service_name] = config
-    logger.info(f"Registered UTCP client for '{service_name}'")
+    logger.info("Registered UTCP client for '%s'", service_name)
 
 
-def get_client(service_name: str) -> Optional[UtcpClient]:
+def get_client(service_name: str) -> UtcpClient | None:
     """Get a registered UTCP client.
 
     Args:
@@ -55,7 +52,7 @@ def get_client(service_name: str) -> Optional[UtcpClient]:
     return _utcp_clients.get(service_name)
 
 
-def get_service_config(service_name: str) -> Optional[UTCPServiceConfig]:
+def get_service_config(service_name: str) -> UTCPServiceConfig | None:
     """Get a registered service configuration.
 
     Args:
@@ -80,4 +77,4 @@ def clear() -> None:
     """Clear all registered clients and configs."""
     _utcp_clients.clear()
     _service_configs.clear()
-    logger.info("Cleared UTCP registry")
+    logger.info('Cleared UTCP registry')

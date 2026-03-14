@@ -4,7 +4,8 @@ These tools allow agents to read and write findings to a shared context,
 enabling cross-agent correlation and preventing redundant investigations.
 """
 
-from typing import Optional, Tuple, Callable, List
+from collections.abc import Callable
+
 from agents import function_tool
 from temporalio import workflow
 
@@ -12,9 +13,8 @@ from ein_agent_worker.models import SharedContext
 
 
 def create_shared_context_tools(
-    shared_context: SharedContext,
-    agent_name: str
-) -> Tuple[Callable, Callable, Callable, Callable]:
+    shared_context: SharedContext, agent_name: str
+) -> tuple[Callable, Callable, Callable, Callable]:
     """Create shared context tools bound to a specific context and agent.
 
     Args:
@@ -22,15 +22,12 @@ def create_shared_context_tools(
         agent_name: Name of the agent using these tools
 
     Returns:
-        Tuple of (update_shared_context, get_shared_context, print_findings_report, group_findings) function tools
+        Tuple of (update_shared_context, get_shared_context,
+        print_findings_report, group_findings) function tools
     """
 
     @function_tool
-    def update_shared_context(
-        key: str,
-        value: str,
-        confidence: float
-    ) -> str:
+    def update_shared_context(key: str, value: str, confidence: float) -> str:
         """Record a finding to the shared context (Blackboard).
 
         Use this tool when you discover important information during investigation.
@@ -51,29 +48,24 @@ def create_shared_context_tools(
             Confirmation message
         """
         workflow.logger.info(
-            f"[Tool Call] update_shared_context called by {agent_name}: "
-            f"key={key}, value={value}, confidence={confidence}"
+            f'[Tool Call] update_shared_context called by {agent_name}: '
+            f'key={key}, value={value}, confidence={confidence}'
         )
 
-        finding = shared_context.add_finding(
+        shared_context.add_finding(
             key=key,
             value=value,
             confidence=confidence,
             agent_name=agent_name,
-            timestamp=workflow.now()
+            timestamp=workflow.now(),
         )
 
-        workflow.logger.info(
-            f"[Tool Result] update_shared_context: Finding recorded for {key}"
-        )
+        workflow.logger.info(f'[Tool Result] update_shared_context: Finding recorded for {key}')
 
-        return (
-            f"Finding recorded: [{agent_name}] {key}: {value} "
-            f"(confidence: {confidence:.2f})"
-        )
+        return f'Finding recorded: [{agent_name}] {key}: {value} (confidence: {confidence:.2f})'
 
     @function_tool
-    def get_shared_context(filter_key: Optional[str] = None) -> str:
+    def get_shared_context(filter_key: str | None = None) -> str:
         """Retrieve findings from the shared context (Blackboard).
 
         Call this at the START of your investigation to check if other agents
@@ -91,22 +83,19 @@ def create_shared_context_tools(
             Summary of relevant findings from other agents
         """
         workflow.logger.info(
-            f"[Tool Call] get_shared_context called by {agent_name}: "
-            f"filter_key={filter_key}"
+            f'[Tool Call] get_shared_context called by {agent_name}: filter_key={filter_key}'
         )
 
         findings = shared_context.get_findings(filter_key=filter_key)
 
-        workflow.logger.info(
-            f"[Tool Result] get_shared_context: Found {len(findings)} findings"
-        )
+        workflow.logger.info(f'[Tool Result] get_shared_context: Found {len(findings)} findings')
 
         if not findings:
             if filter_key:
                 return f"No findings in shared context matching '{filter_key}'."
-            return "No findings in shared context yet. You are the first to investigate."
+            return 'No findings in shared context yet. You are the first to investigate.'
 
-        lines = [f"=== Shared Context ({len(findings)} findings) ==="]
+        lines = [f'=== Shared Context ({len(findings)} findings) ===']
 
         # Group by confidence level
         high_conf = [f for f in findings if f.confidence >= 0.8]
@@ -114,26 +103,29 @@ def create_shared_context_tools(
         low_conf = [f for f in findings if f.confidence < 0.5]
 
         if high_conf:
-            lines.append("\n** HIGH CONFIDENCE (likely root causes) **")
-            for f in high_conf:
-                lines.append(f"  - [{f.agent_name}] {f.key}: {f.value} ({f.confidence:.2f})")
+            lines.append('\n** HIGH CONFIDENCE (likely root causes) **')
+            lines.extend(
+                f'  - [{f.agent_name}] {f.key}: {f.value} ({f.confidence:.2f})' for f in high_conf
+            )
 
         if medium_conf:
-            lines.append("\n** MEDIUM CONFIDENCE **")
-            for f in medium_conf:
-                lines.append(f"  - [{f.agent_name}] {f.key}: {f.value} ({f.confidence:.2f})")
+            lines.append('\n** MEDIUM CONFIDENCE **')
+            lines.extend(
+                f'  - [{f.agent_name}] {f.key}: {f.value} ({f.confidence:.2f})'
+                for f in medium_conf
+            )
 
         if low_conf:
-            lines.append("\n** LOW CONFIDENCE (observations) **")
-            for f in low_conf:
-                lines.append(f"  - [{f.agent_name}] {f.key}: {f.value} ({f.confidence:.2f})")
+            lines.append('\n** LOW CONFIDENCE (observations) **')
+            lines.extend(
+                f'  - [{f.agent_name}] {f.key}: {f.value} ({f.confidence:.2f})' for f in low_conf
+            )
 
-        return "\n".join(lines)
+        return '\n'.join(lines)
 
     @function_tool
     def print_findings_report(
-        title: str = "Investigation Findings Report",
-        include_recommendations: bool = True
+        title: str = 'Investigation Findings Report', include_recommendations: bool = True
     ) -> str:
         """Generate a formatted report of all investigation findings.
 
@@ -149,17 +141,17 @@ def create_shared_context_tools(
             A formatted report suitable for presenting to users
         """
         workflow.logger.info(
-            f"[Tool Call] print_findings_report called by {agent_name}: "
-            f"title={title}, include_recommendations={include_recommendations}"
+            f'[Tool Call] print_findings_report called by {agent_name}: '
+            f'title={title}, include_recommendations={include_recommendations}'
         )
 
         findings = shared_context.findings
 
         if not findings:
             return (
-                f"# {title}\n\n"
-                "No findings have been recorded yet.\n\n"
-                "Use the investigation tools to gather information first."
+                f'# {title}\n\n'
+                'No findings have been recorded yet.\n\n'
+                'Use the investigation tools to gather information first.'
             )
 
         # Group findings by confidence
@@ -170,130 +162,132 @@ def create_shared_context_tools(
         # Group by resource type
         resource_groups: dict[str, list] = {}
         for f in findings:
-            resource_type = f.key.split(":")[0] if ":" in f.key else "other"
+            resource_type = f.key.split(':')[0] if ':' in f.key else 'other'
             if resource_type not in resource_groups:
                 resource_groups[resource_type] = []
             resource_groups[resource_type].append(f)
 
         lines = [
-            f"# {title}",
-            "",
-            f"**Generated by:** {agent_name}",
-            f"**Total Findings:** {len(findings)}",
-            "",
+            f'# {title}',
+            '',
+            f'**Generated by:** {agent_name}',
+            f'**Total Findings:** {len(findings)}',
+            '',
         ]
 
         # Root Causes Section
         if root_causes:
             lines.extend([
-                "## Root Causes Identified",
-                "",
-                "The following issues have been identified with high confidence as root causes:",
-                "",
+                '## Root Causes Identified',
+                '',
+                'The following issues have been identified with high confidence as root causes:',
+                '',
             ])
             for f in sorted(root_causes, key=lambda x: x.confidence, reverse=True):
                 confidence_pct = int(f.confidence * 100)
-                lines.append(f"### {f.key}")
-                lines.append(f"- **Issue:** {f.value}")
-                lines.append(f"- **Confidence:** {confidence_pct}%")
-                lines.append(f"- **Identified by:** {f.agent_name}")
+                lines.append(f'### {f.key}')
+                lines.append(f'- **Issue:** {f.value}')
+                lines.append(f'- **Confidence:** {confidence_pct}%')
+                lines.append(f'- **Identified by:** {f.agent_name}')
                 if f.timestamp:
-                    lines.append(f"- **Time:** {f.timestamp.isoformat()}")
-                lines.append("")
+                    lines.append(f'- **Time:** {f.timestamp.isoformat()}')
+                lines.append('')
 
         # Likely Issues Section
         if likely_issues:
             lines.extend([
-                "## Likely Contributing Factors",
-                "",
-                "These issues may be contributing to the problem:",
-                "",
+                '## Likely Contributing Factors',
+                '',
+                'These issues may be contributing to the problem:',
+                '',
             ])
             for f in sorted(likely_issues, key=lambda x: x.confidence, reverse=True):
                 confidence_pct = int(f.confidence * 100)
-                lines.append(f"- **{f.key}:** {f.value} ({confidence_pct}% confidence, {f.agent_name})")
-            lines.append("")
+                lines.append(
+                    f'- **{f.key}:** {f.value} ({confidence_pct}% confidence, {f.agent_name})'
+                )
+            lines.append('')
 
         # Observations Section
         if observations:
             lines.extend([
-                "## Additional Observations",
-                "",
-                "The following observations were noted during investigation:",
-                "",
+                '## Additional Observations',
+                '',
+                'The following observations were noted during investigation:',
+                '',
             ])
             for f in observations:
                 confidence_pct = int(f.confidence * 100)
-                lines.append(f"- **{f.key}:** {f.value} ({confidence_pct}% confidence)")
-            lines.append("")
+                lines.append(f'- **{f.key}:** {f.value} ({confidence_pct}% confidence)')
+            lines.append('')
 
         # Affected Resources Summary
         if len(resource_groups) > 1:
             lines.extend([
-                "## Affected Resources Summary",
-                "",
+                '## Affected Resources Summary',
+                '',
             ])
             for resource_type, group_findings in sorted(resource_groups.items()):
                 high_conf_count = sum(1 for f in group_findings if f.confidence >= 0.8)
                 lines.append(
-                    f"- **{resource_type.capitalize()}:** {len(group_findings)} findings "
-                    f"({high_conf_count} high confidence)"
+                    f'- **{resource_type.capitalize()}:** '
+                    f'{len(group_findings)} findings '
+                    f'({high_conf_count} high confidence)'
                 )
-            lines.append("")
+            lines.append('')
 
         # Recommendations Section
         if include_recommendations and root_causes:
             lines.extend([
-                "## Recommended Actions",
-                "",
+                '## Recommended Actions',
+                '',
             ])
             for i, f in enumerate(root_causes[:5], 1):  # Top 5 root causes
-                lines.append(f"{i}. Investigate and resolve: **{f.key}**")
-                lines.append(f"   - Issue: {f.value}")
-            lines.append("")
+                lines.append(f'{i}. Investigate and resolve: **{f.key}**')
+                lines.append(f'   - Issue: {f.value}')
+            lines.append('')
 
         lines.extend([
-            "---",
-            "*This report was automatically generated from investigation findings.*"
+            '---',
+            '*This report was automatically generated from investigation findings.*',
         ])
 
-        report = "\n".join(lines)
+        report = '\n'.join(lines)
 
         workflow.logger.info(
-            f"[Tool Result] print_findings_report: Generated report with "
-            f"{len(root_causes)} root causes, {len(likely_issues)} likely issues, "
-            f"{len(observations)} observations"
+            f'[Tool Result] print_findings_report: Generated report with '
+            f'{len(root_causes)} root causes, {len(likely_issues)} likely issues, '
+            f'{len(observations)} observations'
         )
 
         return report
 
     @function_tool
-    def group_findings(
-        name: str,
-        finding_indices: List[int],
-        analysis: str
-    ) -> str:
+    def group_findings(name: str, finding_indices: list[int], analysis: str) -> str:
         """Group related findings into a named incident or root cause.
 
-        Use this tool to consolidate multiple findings that point to the same underlying issue.
-        Finding indices correspond to the numbers shown in the shared context summary (see get_shared_context).
+        Use this tool to consolidate multiple findings that point to
+        the same underlying issue. Finding indices correspond to the
+        numbers shown in the shared context summary
+        (see get_shared_context).
 
         Args:
             name: Name of the group/incident (e.g. "Ceph OSD Failure")
-            finding_indices: List of finding indices (1-based) to group together.
-            analysis: Explanation of how these findings are related and the root cause.
+            finding_indices: List of finding indices (1-based) to group.
+            analysis: Explanation of how these findings are related
+                and the root cause.
 
         Returns:
             Confirmation message
         """
         workflow.logger.info(
-            f"[Tool Call] group_findings called by {agent_name}: "
-            f"name={name}, indices={finding_indices}"
+            f'[Tool Call] group_findings called by {agent_name}: '
+            f'name={name}, indices={finding_indices}'
         )
 
         # Convert 1-based indices to 0-based
         indices_0 = [i - 1 for i in finding_indices]
-        
+
         # Validation
         valid_indices = []
         invalid_indices = []
@@ -302,21 +296,24 @@ def create_shared_context_tools(
                 valid_indices.append(i)
             else:
                 invalid_indices.append(i + 1)
-        
-        if invalid_indices:
-             return f"Error: Invalid indices {invalid_indices}. Valid range: 1-{len(shared_context.findings)}"
-        
-        if not valid_indices:
-            return "Error: No valid findings selected."
 
-        group = shared_context.add_group(
+        if invalid_indices:
+            return (
+                f'Error: Invalid indices {invalid_indices}. '
+                f'Valid range: 1-{len(shared_context.findings)}'
+            )
+
+        if not valid_indices:
+            return 'Error: No valid findings selected.'
+
+        shared_context.add_group(
             name=name,
             finding_indices=valid_indices,
             analysis=analysis,
             agent_name=agent_name,
-            timestamp=workflow.now()
+            timestamp=workflow.now(),
         )
-        
+
         workflow.logger.info(f"[Tool Result] Created group '{name}'")
         return f"Created group '{name}' with {len(valid_indices)} findings."
 

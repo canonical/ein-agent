@@ -10,10 +10,10 @@ logger = logging.getLogger(__name__)
 
 
 # HTTP methods that are considered "write" operations
-WRITE_HTTP_METHODS = {"POST", "PUT", "PATCH", "DELETE", "CREATE", "UPDATE"}
+WRITE_HTTP_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE', 'CREATE', 'UPDATE'}
 
 # HTTP methods that are considered "read" operations
-READ_HTTP_METHODS = {"GET", "LIST", "WATCH", "READ"}
+READ_HTTP_METHODS = {'GET', 'LIST', 'WATCH', 'READ'}
 
 
 def extract_http_method_from_operation(tool_name: str) -> str | None:
@@ -32,7 +32,7 @@ def extract_http_method_from_operation(tool_name: str) -> str | None:
         HTTP method in uppercase, or None if not detected
     """
     # Remove service prefix (e.g., "kubernetes.")
-    operation = tool_name.split(".", 1)[-1]
+    operation = tool_name.split('.', 1)[-1]
 
     # Check for common HTTP method prefixes in camelCase
     for method in WRITE_HTTP_METHODS | READ_HTTP_METHODS:
@@ -46,14 +46,12 @@ def extract_http_method_from_operation(tool_name: str) -> str | None:
         if re.search(rf'\b{method.lower()}\b', operation.lower()):
             return method.upper()
 
-    logger.debug(f"Could not extract HTTP method from operation: {tool_name}")
+    logger.debug('Could not extract HTTP method from operation: %s', tool_name)
     return None
 
 
 def check_needs_approval(
-    approval_policy: str,
-    tool_name: str,
-    arguments: dict[str, Any] | None = None
+    approval_policy: str, tool_name: str, arguments: dict[str, Any] | None = None
 ) -> bool:
     """Check if a UTCP tool call requires approval based on policy.
 
@@ -69,7 +67,10 @@ def check_needs_approval(
     try:
         policy = ApprovalPolicy(approval_policy)
     except ValueError:
-        logger.warning(f"Invalid approval policy '{approval_policy}', defaulting to write_operations")
+        logger.warning(
+            "Invalid approval policy '%s', defaulting to write_operations",
+            approval_policy,
+        )
         policy = ApprovalPolicy.WRITE_OPERATIONS
 
     # Never require approval
@@ -85,7 +86,10 @@ def check_needs_approval(
 
     if not http_method:
         # Can't determine method, err on the side of caution
-        logger.warning(f"Could not determine HTTP method for {tool_name}, requiring approval")
+        logger.warning(
+            'Could not determine HTTP method for %s, requiring approval',
+            tool_name,
+        )
         return True
 
     # Write operations policy: require approval for writes
@@ -112,34 +116,34 @@ def create_approval_checker(service_config, sticky_approvals: dict[str, bool] | 
     Returns:
         Callable that checks if a tool call needs approval
     """
+
     def needs_approval_fn(_ctx, params: dict[str, Any], _call_id: str) -> bool:
         """Check if this tool call needs approval."""
-        tool_name = params.get("tool_name", "")
-        arguments = params.get("arguments")
+        tool_name = params.get('tool_name', '')
+        arguments = params.get('arguments')
 
         # Parse arguments if it's a JSON string
         if isinstance(arguments, str):
             import json
+
             try:
                 arguments = json.loads(arguments) if arguments else {}
             except json.JSONDecodeError:
                 arguments = {}
 
         # Check sticky approvals first (if provided)
-        if sticky_approvals is not None:
-            # Check exact tool name
-            if tool_name in sticky_approvals:
-                cached_decision = sticky_approvals[tool_name]
-                logger.debug(f"Sticky approval for {tool_name}: {'approved' if cached_decision else 'rejected'}")
-                # If sticky approved, don't need approval again
-                # If sticky rejected, still need to interrupt (to show rejection)
-                return not cached_decision
+        if sticky_approvals is not None and tool_name in sticky_approvals:
+            cached_decision = sticky_approvals[tool_name]
+            logger.debug(
+                'Sticky approval for %s: %s',
+                tool_name,
+                'approved' if cached_decision else 'rejected',
+            )
+            # If sticky approved, don't need approval again
+            # If sticky rejected, still need to interrupt (to show rejection)
+            return not cached_decision
 
         # No sticky decision, check policy
-        return check_needs_approval(
-            service_config.approval_policy,
-            tool_name,
-            arguments
-        )
+        return check_needs_approval(service_config.approval_policy, tool_name, arguments)
 
     return needs_approval_fn

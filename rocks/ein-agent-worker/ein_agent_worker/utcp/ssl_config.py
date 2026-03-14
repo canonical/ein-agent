@@ -38,26 +38,24 @@ class SSLConfigManager:
         ssl_context.verify_mode = ssl.CERT_NONE
 
         # Patch aiohttp's TCPConnector to use insecure SSL by default
-        _original_init = aiohttp.TCPConnector.__init__
+        original_init = aiohttp.TCPConnector.__init__
 
         def _patched_init(self, *args, **kwargs):
-            if "ssl" not in kwargs:
-                kwargs["ssl"] = ssl_context
-            _original_init(self, *args, **kwargs)
+            if 'ssl' not in kwargs:
+                kwargs['ssl'] = ssl_context
+            original_init(self, *args, **kwargs)
 
         aiohttp.TCPConnector.__init__ = _patched_init
 
         # Also patch ClientSession to pass ssl=False by default
-        _original_request = aiohttp.ClientSession._request
+        original_request = aiohttp.ClientSession._request
 
         async def _patched_request(self, method, url, **kwargs):
-            if "ssl" not in kwargs:
-                kwargs["ssl"] = False
-            return await _original_request(self, method, url, **kwargs)
+            if 'ssl' not in kwargs:
+                kwargs['ssl'] = False
+            return await original_request(self, method, url, **kwargs)
 
         aiohttp.ClientSession._request = _patched_request
 
         self._configured = True
-        logger.warning(
-            "SSL verification disabled for aiohttp - use only for development"
-        )
+        logger.warning('SSL verification disabled for aiohttp - use only for development')

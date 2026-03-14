@@ -14,7 +14,7 @@ from ein_agent_worker.utcp.config import UTCPConfig
 
 
 @activity.defn
-async def load_utcp_config() -> list[dict[str, Any]]:
+async def load_utcp_config() -> list[dict[str, Any]]:  # noqa: RUF029
     """Load UTCP service configurations from environment.
 
     Returns:
@@ -29,32 +29,33 @@ async def load_utcp_config() -> list[dict[str, Any]]:
         - dynamic: Whether to generate tools dynamically
     """
     config = UTCPConfig.from_env()
-    services = []
+    services = [
+        {
+            'name': svc.name,
+            'openapi_url': svc.openapi_url,
+            'auth_type': svc.auth_type,
+            'token': svc.token,
+            'insecure': svc.insecure,
+            'enabled': svc.enabled,
+            'version': svc.version,
+            'dynamic': svc.dynamic,
+        }
+        for svc in config.enabled_services
+    ]
 
-    for svc in config.enabled_services:
-        services.append({
-            "name": svc.name,
-            "openapi_url": svc.openapi_url,
-            "auth_type": svc.auth_type,
-            "token": svc.token,
-            "insecure": svc.insecure,
-            "enabled": svc.enabled,
-            "version": svc.version,
-            "dynamic": svc.dynamic,
-        })
-
-    activity.logger.info(f"Loaded {len(services)} UTCP service(s): {[s['name'] for s in services]}")
+    svc_names = [s['name'] for s in services]
+    activity.logger.info('Loaded %d UTCP service(s): %s', len(services), svc_names)
     return services
 
 
 @activity.defn
-async def load_worker_model() -> str:
+async def load_worker_model() -> str:  # noqa: RUF029
     """Load the LLM model configuration from environment.
 
     Returns:
         The configured model name from EIN_AGENT_MODEL env var,
         or DEFAULT_MODEL if not set.
     """
-    model = os.getenv("EIN_AGENT_MODEL", DEFAULT_MODEL)
-    activity.logger.info(f"Loaded worker model configuration: {model}")
+    model = os.getenv('EIN_AGENT_MODEL', DEFAULT_MODEL)
+    activity.logger.info('Loaded worker model configuration: %s', model)
     return model

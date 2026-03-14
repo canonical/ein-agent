@@ -1,38 +1,37 @@
 """Ein Agent CLI commands - entrypoint."""
 
 import asyncio
-from typing import Optional
 
 import typer
 
-from ein_agent_cli.hitl_orchestrator import run_hitl_workflow, connect_hitl_workflow
+from ein_agent_cli.hitl_orchestrator import connect_hitl_workflow, run_hitl_workflow
 from ein_agent_cli.models import HITLWorkflowConfig
 
-app = typer.Typer(help="Ein Agent CLI - Interactive investigation")
+app = typer.Typer(help='Ein Agent CLI - Interactive investigation')
 
 
 @app.command()
 def connect(
     workflow_id: str = typer.Option(
         ...,
-        "--workflow-id",
-        "-w",
-        help="Workflow ID to connect to",
+        '--workflow-id',
+        '-w',
+        help='Workflow ID to connect to',
     ),
-    temporal_host: Optional[str] = typer.Option(
+    temporal_host: str | None = typer.Option(
         None,
-        "--temporal-host",
-        help="Temporal server host:port",
+        '--temporal-host',
+        help='Temporal server host:port',
     ),
-    temporal_namespace: Optional[str] = typer.Option(
+    temporal_namespace: str | None = typer.Option(
         None,
-        "--temporal-namespace",
-        help="Temporal namespace",
+        '--temporal-namespace',
+        help='Temporal namespace',
     ),
-    temporal_queue: Optional[str] = typer.Option(
+    temporal_queue: str | None = typer.Option(
         None,
-        "--temporal-queue",
-        help="Temporal task queue",
+        '--temporal-queue',
+        help='Temporal task queue',
     ),
 ):
     """Connect to an existing interactive investigation session.
@@ -42,7 +41,6 @@ def connect(
     started by another user or process.
 
     Examples:
-
       # Connect to a specific workflow
       ein-agent-cli connect --workflow-id hitl-investigation-20231025-120000
 
@@ -62,30 +60,30 @@ def connect(
 
 @app.command()
 def investigate(
-    temporal_host: Optional[str] = typer.Option(
+    temporal_host: str | None = typer.Option(
         None,
-        "--temporal-host",
-        help="Temporal server host:port",
+        '--temporal-host',
+        help='Temporal server host:port',
     ),
-    temporal_namespace: Optional[str] = typer.Option(
+    temporal_namespace: str | None = typer.Option(
         None,
-        "--temporal-namespace",
-        help="Temporal namespace",
+        '--temporal-namespace',
+        help='Temporal namespace',
     ),
-    temporal_queue: Optional[str] = typer.Option(
+    temporal_queue: str | None = typer.Option(
         None,
-        "--temporal-queue",
-        help="Temporal task queue",
+        '--temporal-queue',
+        help='Temporal task queue',
     ),
-    workflow_id: Optional[str] = typer.Option(
+    workflow_id: str | None = typer.Option(
         None,
-        "--workflow-id",
-        help="Custom workflow ID",
+        '--workflow-id',
+        help='Custom workflow ID',
     ),
     max_turns: int = typer.Option(
         50,
-        "--max-turns",
-        help="Maximum agent turns before stopping",
+        '--max-turns',
+        help='Maximum agent turns before stopping',
     ),
 ):
     """Start an interactive investigation session.
@@ -102,7 +100,6 @@ def investigate(
     - UTCP tools (Kubernetes, Grafana, Ceph) for infrastructure queries
 
     Examples:
-
       # Start interactive investigation with default settings
       ein-agent-cli investigate
 

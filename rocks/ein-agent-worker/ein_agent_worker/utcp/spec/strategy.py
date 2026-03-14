@@ -64,17 +64,23 @@ class LocalFileStrategy(SpecSourceStrategy):
         if not local_spec_path or not local_spec_path.exists():
             raise FileNotFoundError(
                 f"Local spec file not found for service '{service_name}' "
-                f"in {specs_dir / service_name}"
+                f'in {specs_dir / service_name}'
             )
 
         logger.info(
-            f"[{service_name}] Loading OpenAPI spec from LOCAL file: {local_spec_path}"
+            '[%s] Loading OpenAPI spec from LOCAL file: %s',
+            service_name,
+            local_spec_path,
         )
-        logger.info(f"[{service_name}] API calls will use base: {api_base_url}")
+        logger.info(
+            '[%s] API calls will use base: %s',
+            service_name,
+            api_base_url,
+        )
         return SpecSource(
-            url=f"file://{local_spec_path}",
+            url=f'file://{local_spec_path}',
             api_base_url=api_base_url,
-            source_type="local",
+            source_type='local',
         )
 
 
@@ -92,11 +98,17 @@ class LiveURLStrategy(SpecSourceStrategy):
         api_base_url = strip_openapi_suffix(openapi_url)
 
         logger.info(
-            f"[{service_name}] Loading OpenAPI spec from LIVE URL: {openapi_url}"
+            '[%s] Loading OpenAPI spec from LIVE URL: %s',
+            service_name,
+            openapi_url,
         )
-        logger.info(f"[{service_name}] API calls will use base: {api_base_url}")
+        logger.info(
+            '[%s] API calls will use base: %s',
+            service_name,
+            api_base_url,
+        )
         return SpecSource(
             url=openapi_url,
             api_base_url=api_base_url,
-            source_type="live",
+            source_type='live',
         )

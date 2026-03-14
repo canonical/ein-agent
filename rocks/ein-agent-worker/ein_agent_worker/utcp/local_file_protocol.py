@@ -11,20 +11,20 @@ to ALL specs (both file:// and https://) via OpenAPI handlers.
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import httpx
 import yaml
-from utcp.data.call_template import CallTemplate
-from utcp.data.register_manual_response import RegisterManualResult
-from utcp.data.utcp_manual import UtcpManual, UtcpManualSerializer
 from utcp_http.http_call_template import HttpCallTemplate
 from utcp_http.http_communication_protocol import HttpCommunicationProtocol
 from utcp_http.openapi_converter import OpenApiConverter
 
 from ein_agent_worker.utcp.openapi_handlers import DEFAULT_OPENAPI_HANDLERS, OpenApiHandler
 from ein_agent_worker.utcp.openapi_handlers.default import DefaultOpenApiHandler
+from utcp.data.call_template import CallTemplate
+from utcp.data.register_manual_response import RegisterManualResult
+from utcp.data.utcp_manual import UtcpManual, UtcpManualSerializer
 
 if TYPE_CHECKING:
     from utcp.utcp_client import UtcpClient
@@ -50,10 +50,10 @@ def set_api_base_url(service_name: str, url: str) -> None:
         url: The actual API endpoint URL (e.g., 'https://10.x.x.x:6443')
     """
     _api_base_urls[service_name] = url
-    logger.debug(f"Registered API base URL for {service_name}: {url}")
+    logger.debug('Registered API base URL for %s: %s', service_name, url)
 
 
-def get_api_base_url(service_name: str) -> Optional[str]:
+def get_api_base_url(service_name: str) -> str | None:
     """Get the registered API base URL for a service.
 
     Args:
@@ -77,13 +77,13 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
 
     def __init__(
         self,
-        openapi_handlers: Optional[dict[str, OpenApiHandler]] = None,
+        openapi_handlers: dict[str, OpenApiHandler] | None = None,
     ):
         super().__init__()
         self.openapi_handlers = openapi_handlers or DEFAULT_OPENAPI_HANDLERS
 
     async def register_manual(
-        self, caller: "UtcpClient", manual_call_template: CallTemplate
+        self, caller: 'UtcpClient', manual_call_template: CallTemplate
     ) -> RegisterManualResult:
         """Register a manual, supporting both HTTP and file:// URLs.
 
@@ -97,14 +97,12 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
             RegisterManualResult object containing the call template and manual.
         """
         if not isinstance(manual_call_template, HttpCallTemplate):
-            raise ValueError(
-                "LocalFileHttpProtocol can only be used with HttpCallTemplate"
-            )
+            raise ValueError('LocalFileHttpProtocol can only be used with HttpCallTemplate')
 
         url = manual_call_template.url
 
         # Handle file:// URLs by reading directly from disk
-        if url.startswith("file://"):
+        if url.startswith('file://'):
             return await self._register_from_file(manual_call_template, url)
 
         # Handle HTTP/HTTPS URLs with preprocessing
@@ -124,31 +122,34 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
         """
         try:
             # Convert file:// URL to path
-            file_path = Path(file_url.replace("file://", ""))
+            file_path = Path(file_url.replace('file://', ''))
 
             if not file_path.exists():
-                error_msg = f"Spec file not found: {file_path}"
+                error_msg = f'Spec file not found: {file_path}'
                 logger.error(error_msg)
                 return RegisterManualResult(
                     success=False,
                     manual_call_template=manual_call_template,
-                    manual=UtcpManual(manual_version="0.0.0", tools=[]),
+                    manual=UtcpManual(manual_version='0.0.0', tools=[]),
                     errors=[error_msg],
                 )
 
-            logger.info(f"Loading OpenAPI spec from local file: {file_path}")
+            logger.info('Loading OpenAPI spec from local file: %s', file_path)
 
             # Read and parse the file
             content = file_path.read_text()
 
-            if file_path.suffix in [".yaml", ".yml"]:
+            if file_path.suffix in ['.yaml', '.yml']:
                 spec_data = yaml.safe_load(content)
             else:
                 spec_data = json.loads(content)
 
             # Check if UTCP manual or OpenAPI spec
-            if "utcp_version" in spec_data and "tools" in spec_data:
-                logger.info(f"Detected UTCP manual from '{manual_call_template.name}'")
+            if 'utcp_version' in spec_data and 'tools' in spec_data:
+                logger.info(
+                    "Detected UTCP manual from '%s'",
+                    manual_call_template.name,
+                )
                 utcp_manual = UtcpManualSerializer().validate_dict(spec_data)
             else:
                 # Convert OpenAPI spec to UTCP manual
@@ -168,29 +169,38 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
                 if api_base_url:
                     parsed = urlparse(api_base_url)
 
-                    # Delegate URL resolution to the handler (supports Swagger 2.0 basePath
-                    # and OpenAPI 3.x servers with relative URLs)
-                    resolved_url = handler.resolve_server_url(spec_data, api_base_url, service_name)
+                    # Delegate URL resolution to the handler
+                    resolved_url = handler.resolve_server_url(
+                        spec_data, api_base_url, service_name
+                    )
                     spec_data['servers'] = [{'url': resolved_url}]
 
-                    # Set host and scheme for fallback (in case servers is not used)
+                    # Set host and scheme for fallback
                     spec_data['host'] = parsed.netloc
                     spec_data['schemes'] = [parsed.scheme]
 
-                    # Use scheme://host as spec_url (servers takes priority anyway)
-                    spec_url_param = f"{parsed.scheme}://{parsed.netloc}"
+                    # Use scheme://host as spec_url
+                    spec_url_param = f'{parsed.scheme}://{parsed.netloc}'
                     logger.info(
-                        f"[{service_name}] Set spec: host={parsed.netloc}, scheme={parsed.scheme}, spec_url={spec_url_param}"
+                        '[%s] Set spec: host=%s, scheme=%s, spec_url=%s',
+                        service_name,
+                        parsed.netloc,
+                        parsed.scheme,
+                        spec_url_param,
                     )
                 else:
                     # No configured API base URL, fall back to spec file URL
                     spec_url_param = manual_call_template.url
                     logger.warning(
-                        f"[{service_name}] No API base URL configured, falling back to spec URL: {spec_url_param}"
+                        '[%s] No API base URL configured, falling back to spec URL: %s',
+                        service_name,
+                        spec_url_param,
                     )
 
                 logger.info(
-                    f"[{service_name}] Converting OpenAPI spec to UTCP manual with base URL: {spec_url_param}"
+                    '[%s] Converting OpenAPI spec to UTCP manual with base URL: %s',
+                    service_name,
+                    spec_url_param,
                 )
                 converter = OpenApiConverter(
                     spec_data,
@@ -208,27 +218,27 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
             )
 
         except (json.JSONDecodeError, yaml.YAMLError) as e:
-            error_msg = f"Error parsing spec file: {e}"
+            error_msg = f'Error parsing spec file: {e}'
             logger.error(error_msg)
             return RegisterManualResult(
                 success=False,
                 manual_call_template=manual_call_template,
-                manual=UtcpManual(manual_version="0.0.0", tools=[]),
+                manual=UtcpManual(manual_version='0.0.0', tools=[]),
                 errors=[error_msg],
             )
         except Exception as e:
-            error_msg = f"Error loading spec from file: {e}"
+            error_msg = f'Error loading spec from file: {e}'
             logger.error(error_msg)
             return RegisterManualResult(
                 success=False,
                 manual_call_template=manual_call_template,
-                manual=UtcpManual(manual_version="0.0.0", tools=[]),
+                manual=UtcpManual(manual_version='0.0.0', tools=[]),
                 errors=[error_msg],
             )
 
     async def _register_from_http(
         self,
-        caller: "UtcpClient",
+        caller: 'UtcpClient',
         manual_call_template: HttpCallTemplate,
         http_url: str,
     ) -> RegisterManualResult:
@@ -247,29 +257,32 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
         """
         try:
             service_name = manual_call_template.name
-            logger.info(f"[{service_name}] Loading OpenAPI spec from LIVE URL: {http_url}")
+            logger.info(
+                '[%s] Loading OpenAPI spec from LIVE URL: %s',
+                service_name,
+                http_url,
+            )
 
-            # Fetch spec from URL using httpx (supports async and SSL verification control)
-            async with httpx.AsyncClient(verify=False) as client:  # SSL verification controlled globally
+            # Fetch spec from URL using httpx
+            async with httpx.AsyncClient(verify=False) as client:  # noqa: S501
                 response = await client.get(http_url)
                 response.raise_for_status()
 
                 # Parse response
-                content_type = response.headers.get("content-type", "")
-                if "yaml" in content_type or http_url.endswith((".yaml", ".yml")):
+                content_type = response.headers.get('content-type', '')
+                if 'yaml' in content_type or http_url.endswith(('.yaml', '.yml')):
                     spec_data = yaml.safe_load(response.text)
                 else:
                     spec_data = response.json()
 
-            # Apply service-specific preprocessing via handler (including read-only filtering)
-            handler = self.openapi_handlers.get(
-                service_name, DefaultOpenApiHandler(service_name)
-            )
+            # Apply service-specific preprocessing via handler
+            handler = self.openapi_handlers.get(service_name, DefaultOpenApiHandler(service_name))
             spec_data = handler.preprocess_spec(spec_data, service_name)
 
             # Convert OpenAPI spec to UTCP manual
             logger.info(
-                f"[{service_name}] Converting OpenAPI spec to UTCP manual (from live URL)"
+                '[%s] Converting OpenAPI spec to UTCP manual (from live URL)',
+                service_name,
             )
             converter = OpenApiConverter(
                 spec_data,
@@ -287,30 +300,30 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
             )
 
         except httpx.HTTPStatusError as e:
-            error_msg = f"HTTP error fetching spec from {http_url}: {e.response.status_code}"
+            error_msg = f'HTTP error fetching spec from {http_url}: {e.response.status_code}'
             logger.error(error_msg)
             return RegisterManualResult(
                 success=False,
                 manual_call_template=manual_call_template,
-                manual=UtcpManual(manual_version="0.0.0", tools=[]),
+                manual=UtcpManual(manual_version='0.0.0', tools=[]),
                 errors=[error_msg],
             )
         except (json.JSONDecodeError, yaml.YAMLError) as e:
-            error_msg = f"Error parsing spec from {http_url}: {e}"
+            error_msg = f'Error parsing spec from {http_url}: {e}'
             logger.error(error_msg)
             return RegisterManualResult(
                 success=False,
                 manual_call_template=manual_call_template,
-                manual=UtcpManual(manual_version="0.0.0", tools=[]),
+                manual=UtcpManual(manual_version='0.0.0', tools=[]),
                 errors=[error_msg],
             )
         except Exception as e:
-            error_msg = f"Error loading spec from {http_url}: {e}"
+            error_msg = f'Error loading spec from {http_url}: {e}'
             logger.error(error_msg)
             return RegisterManualResult(
                 success=False,
                 manual_call_template=manual_call_template,
-                manual=UtcpManual(manual_version="0.0.0", tools=[]),
+                manual=UtcpManual(manual_version='0.0.0', tools=[]),
                 errors=[error_msg],
             )
 
@@ -330,11 +343,11 @@ def register_local_file_protocol() -> None:
     from utcp.plugins.discovery import register_communication_protocol
 
     protocol = LocalFileHttpProtocol()
-    registered = register_communication_protocol("http", protocol, override=True)
+    registered = register_communication_protocol('http', protocol, override=True)
 
     if registered:
-        logger.info("Registered LocalFileHttpProtocol for file:// URL support")
+        logger.info('Registered LocalFileHttpProtocol for file:// URL support')
     else:
-        logger.warning("Failed to register LocalFileHttpProtocol")
+        logger.warning('Failed to register LocalFileHttpProtocol')
 
     _protocol_registered = True

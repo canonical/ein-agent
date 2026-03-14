@@ -36,7 +36,7 @@ class GeminiCompatibleLitellmModel(LitellmModel):
     async def _fetch_response(
         self,
         system_instructions: str | None,
-        input: str | list[Any],
+        input: str | list[Any],  # noqa: A002
         model_settings: Any,
         tools: list[Any],
         output_schema: Any | None,
@@ -56,7 +56,7 @@ class GeminiCompatibleLitellmModel(LitellmModel):
         appends a synthetic user message to allow the conversation to proceed.
         """
         # Only apply the fix for Gemini models (e.g., "gemini/gemini-2.0-flash")
-        is_gemini = self.model.startswith("gemini/") or self.model.startswith("gemini-")
+        is_gemini = self.model.startswith('gemini/') or self.model.startswith('gemini-')
 
         if is_gemini and isinstance(input, list) and input:
             # Get the last message in the conversation
@@ -64,13 +64,16 @@ class GeminiCompatibleLitellmModel(LitellmModel):
 
             # Check if it's an assistant message (could be a dict or Pydantic model)
             # Use hasattr to safely handle both dict and object-like messages
-            if hasattr(last_message, "get") and last_message.get("role") == "assistant":
+            if hasattr(last_message, 'get') and last_message.get('role') == 'assistant':
                 # Append a synthetic user message to satisfy Gemini's requirements
                 # This message prompts the model to continue based on the handoff context
-                input = list(input) + [{
-                    "role": "user",
-                    "content": "Please continue with the task based on the context above."
-                }]
+                input = [  # noqa: A001
+                    *input,
+                    {
+                        'role': 'user',
+                        'content': 'Please continue with the task based on the context above.',
+                    },
+                ]
 
         # Call the parent implementation with the (possibly modified) input
         return await super()._fetch_response(
@@ -120,7 +123,7 @@ class GeminiCompatibleLitellmProvider(ModelProvider):
             ValueError: If model_name is None.
         """
         if model_name is None:
-            raise ValueError("model_name is required for GeminiCompatibleLitellmProvider")
+            raise ValueError('model_name is required for GeminiCompatibleLitellmProvider')
 
         # Return our custom model that handles Gemini's message requirements
         return GeminiCompatibleLitellmModel(model=model_name)

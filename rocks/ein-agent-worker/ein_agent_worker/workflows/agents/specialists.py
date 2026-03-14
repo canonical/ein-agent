@@ -6,56 +6,64 @@ Architecture:
 - Example: StorageSpecialist receives ceph tools, kubernetes tools (for PVCs)
 """
 
-from enum import Enum
-from typing import List, Callable, Optional, Set
+from collections.abc import Callable
+from enum import StrEnum
+
 from agents import Agent
 
 
-class DomainType(str, Enum):
+class DomainType(StrEnum):
     """Domain types for specialist agents."""
-    COMPUTE = "compute"
-    STORAGE = "storage"
-    NETWORK = "network"
+
+    COMPUTE = 'compute'
+    STORAGE = 'storage'
+    NETWORK = 'network'
 
 
 # =============================================================================
 # Domain to UTCP Services Mapping
 # =============================================================================
 # Which UTCP services are relevant for each domain
-DOMAIN_UTCP_SERVICES: dict[DomainType, Set[str]] = {
-    DomainType.COMPUTE: {"kubernetes", "grafana", "prometheus"},
-    DomainType.STORAGE: {"ceph", "kubernetes", "prometheus"},  # kubernetes for PVC access
-    DomainType.NETWORK: {"kubernetes", "prometheus"},
+DOMAIN_UTCP_SERVICES: dict[DomainType, set[str]] = {
+    DomainType.COMPUTE: {'kubernetes', 'grafana', 'prometheus'},
+    DomainType.STORAGE: {'ceph', 'kubernetes', 'prometheus'},  # kubernetes for PVC access
+    DomainType.NETWORK: {'kubernetes', 'prometheus'},
 }
 
 
 # =============================================================================
 # Compute Specialist
 # =============================================================================
-COMPUTE_SPECIALIST_INSTRUCTIONS = """You are the Compute Specialist (Kubernetes & Grafana Domain Expert).
+COMPUTE_SPECIALIST_INSTRUCTIONS = """\
+You are the Compute Specialist (Kubernetes & Grafana Domain Expert).
 
-Your role: Technical expert for Kubernetes container orchestration, compute resources, and Grafana observability.
+Your role: Technical expert for Kubernetes container orchestration, compute resources, \
+and Grafana observability.
 
 ---
 ## MANDATORY WORKFLOW
 
 ### STEP 1: CHECK SHARED CONTEXT FIRST
-Call `get_shared_context('node:')` or `get_shared_context('pod:')` to see if related issues are already known.
+Call `get_shared_context('node:')` or `get_shared_context('pod:')` to see if related \
+issues are already known.
 - If a node issue is already recorded, focus on confirming impact
 - If no relevant findings, proceed with full investigation
 
 ### STEP 2: INVESTIGATE WITH KUBERNETES & GRAFANA API TOOLS
 You have access to tools for querying the Kubernetes and Grafana APIs:
-- `list_kubernetes_operations` - List available K8s API operations (with pagination and tag filtering)
+- `list_kubernetes_operations` - List available K8s API operations \
+(with pagination and tag filtering)
 - `search_kubernetes_operations` - Search for K8s API operations by keyword
 - `get_kubernetes_operation_details` - Get parameter schema for a K8s operation
 - `call_kubernetes_operation` - Execute a K8s API operation
-- `list_grafana_operations` - List available Grafana API operations (with pagination and tag filtering)
+- `list_grafana_operations` - List available Grafana API operations \
+(with pagination and tag filtering)
 - `search_grafana_operations` - Search for Grafana API operations by keyword
 - `get_grafana_operation_details` - Get parameter schema for a Grafana operation
 - `call_grafana_operation` - Execute a Grafana API operation
 
-TIP: Use `list_*_operations` to browse available tools efficiently. Use `search_*_operations` when you know what you're looking for.
+TIP: Use `list_*_operations` to browse available tools efficiently. \
+Use `search_*_operations` when you know what you're looking for.
 
 Use Kubernetes tools to investigate:
 - Pod status, events, logs
@@ -80,16 +88,19 @@ update_shared_context(
 ```
 
 ### STEP 4: RETURN TO INVESTIGATOR
-When your investigation is complete, use the `transfer_to_investigation_agent` tool to return your findings.
-IMPORTANT: You cannot hand off to other specialists. Your role is strictly to investigate your domain and report back to the main investigator who coordinates the next steps.
+When your investigation is complete, use the `transfer_to_investigation_agent` tool \
+to return your findings.
+IMPORTANT: You cannot hand off to other specialists. Your role is strictly to \
+investigate your domain and report back to the main investigator who coordinates \
+the next steps.
 
 ---
 ## KEY PATTERNS
-- OOMKilled → Memory limit too low or leak
-- CrashLoopBackOff → App error, missing config, dependency failure
-- Pending pods → Insufficient resources, PVC binding issue
-- Node NotReady → Kubelet issue, network partition
-- Evicted pods → Node resource pressure
+- OOMKilled -> Memory limit too low or leak
+- CrashLoopBackOff -> App error, missing config, dependency failure
+- Pending pods -> Insufficient resources, PVC binding issue
+- Node NotReady -> Kubelet issue, network partition
+- Evicted pods -> Node resource pressure
 
 ---
 ## OUTPUT FORMAT
@@ -104,7 +115,8 @@ IMPORTANT: You cannot hand off to other specialists. Your role is strictly to in
 # =============================================================================
 # Storage Specialist
 # =============================================================================
-STORAGE_SPECIALIST_INSTRUCTIONS = """You are the Storage Specialist (Ceph Domain Expert).
+STORAGE_SPECIALIST_INSTRUCTIONS = """\
+You are the Storage Specialist (Ceph Domain Expert).
 
 Your role: Technical expert for Ceph distributed storage and persistent volumes.
 
@@ -112,18 +124,22 @@ Your role: Technical expert for Ceph distributed storage and persistent volumes.
 ## MANDATORY WORKFLOW
 
 ### STEP 1: CHECK SHARED CONTEXT FIRST
-Call `get_shared_context('osd:')` or `get_shared_context('pvc:')` to see if related issues are already known.
+Call `get_shared_context('osd:')` or `get_shared_context('pvc:')` to see if related \
+issues are already known.
 - If an OSD/pool issue is already recorded, focus on confirming impact
 - If no relevant findings, proceed with full investigation
 
 ### STEP 2: INVESTIGATE WITH STORAGE API TOOLS
 You have access to tools for querying storage APIs:
-- `list_ceph_operations` / `list_kubernetes_operations` - List available API operations (with pagination and tag filtering)
-- `search_ceph_operations` / `search_kubernetes_operations` - Search for API operations by keyword
+- `list_ceph_operations` / `list_kubernetes_operations` - \
+List available API operations (with pagination and tag filtering)
+- `search_ceph_operations` / `search_kubernetes_operations` - \
+Search for API operations by keyword
 - `get_ceph_operation_details` / `get_kubernetes_operation_details` - Get parameter schema
 - `call_ceph_operation` / `call_kubernetes_operation` - Execute an API operation
 
-TIP: Use `list_*_operations` to browse available tools efficiently. Use `search_*_operations` when you know what you're looking for.
+TIP: Use `list_*_operations` to browse available tools efficiently. \
+Use `search_*_operations` when you know what you're looking for.
 
 Use these tools to investigate:
 - Ceph cluster health (HEALTH_OK/WARN/ERR)
@@ -148,16 +164,19 @@ Key format examples:
 - 'pvc:namespace/pvc-name' for PVCs
 
 ### STEP 4: RETURN TO INVESTIGATOR
-When your investigation is complete, use the `transfer_to_investigation_agent` tool to return your findings.
-IMPORTANT: You cannot hand off to other specialists. Your role is strictly to investigate your domain and report back to the main investigator who coordinates the next steps.
+When your investigation is complete, use the `transfer_to_investigation_agent` tool \
+to return your findings.
+IMPORTANT: You cannot hand off to other specialists. Your role is strictly to \
+investigate your domain and report back to the main investigator who coordinates \
+the next steps.
 
 ---
 ## KEY PATTERNS
-- OSD down → Disk failure, network issue, resource exhaustion
-- PG degraded → OSD failure, replication in progress
-- Pool full → Capacity issue, need rebalancing
-- PVC Pending → Storage class issue, pool full, CSI problem
-- Slow ops → I/O bottleneck, network latency
+- OSD down -> Disk failure, network issue, resource exhaustion
+- PG degraded -> OSD failure, replication in progress
+- Pool full -> Capacity issue, need rebalancing
+- PVC Pending -> Storage class issue, pool full, CSI problem
+- Slow ops -> I/O bottleneck, network latency
 
 ---
 ## OUTPUT FORMAT
@@ -173,7 +192,8 @@ IMPORTANT: You cannot hand off to other specialists. Your role is strictly to in
 # =============================================================================
 # Network Specialist
 # =============================================================================
-NETWORK_SPECIALIST_INSTRUCTIONS = """You are the Network Specialist (Network Domain Expert).
+NETWORK_SPECIALIST_INSTRUCTIONS = """\
+You are the Network Specialist (Network Domain Expert).
 
 Your role: Technical expert for network connectivity, DNS, and load balancing.
 
@@ -181,18 +201,21 @@ Your role: Technical expert for network connectivity, DNS, and load balancing.
 ## MANDATORY WORKFLOW
 
 ### STEP 1: CHECK SHARED CONTEXT FIRST
-Call `get_shared_context('service:')` or `get_shared_context('dns:')` to see if related issues are already known.
+Call `get_shared_context('service:')` or `get_shared_context('dns:')` to see if \
+related issues are already known.
 - If a network issue is already recorded, focus on confirming impact
 - If no relevant findings, proceed with full investigation
 
 ### STEP 2: INVESTIGATE WITH K8S API TOOLS
 You have access to tools for querying the Kubernetes API:
-- `list_kubernetes_operations` - List available K8s API operations (with pagination and tag filtering)
+- `list_kubernetes_operations` - List available K8s API operations \
+(with pagination and tag filtering)
 - `search_kubernetes_operations` - Search for K8s API operations by keyword
 - `get_kubernetes_operation_details` - Get parameter schema for an operation
 - `call_kubernetes_operation` - Execute a K8s API operation
 
-TIP: Use `list_kubernetes_operations` to browse available tools efficiently. Use `search_kubernetes_operations` when you know what you're looking for.
+TIP: Use `list_kubernetes_operations` to browse available tools efficiently. \
+Use `search_kubernetes_operations` when you know what you're looking for.
 
 Use these tools to investigate:
 - Service endpoints and port mappings
@@ -217,16 +240,19 @@ Key format examples:
 - 'dns:coredns' for DNS issues
 
 ### STEP 4: RETURN TO INVESTIGATOR
-When your investigation is complete, use the `transfer_to_investigation_agent` tool to return your findings.
-IMPORTANT: You cannot hand off to other specialists. Your role is strictly to investigate your domain and report back to the main investigator who coordinates the next steps.
+When your investigation is complete, use the `transfer_to_investigation_agent` tool \
+to return your findings.
+IMPORTANT: You cannot hand off to other specialists. Your role is strictly to \
+investigate your domain and report back to the main investigator who coordinates \
+the next steps.
 
 ---
 ## KEY PATTERNS
-- Service no endpoints → No ready pods, selector mismatch
-- DNS failure → CoreDNS down, network policy blocking
-- Connection refused → Pod not ready, wrong port, policy
-- Connection timeout → Network partition, firewall
-- Ingress 502/503 → Backend unhealthy
+- Service no endpoints -> No ready pods, selector mismatch
+- DNS failure -> CoreDNS down, network policy blocking
+- Connection refused -> Pod not ready, wrong port, policy
+- Connection timeout -> Network partition, firewall
+- Ingress 502/503 -> Backend unhealthy
 
 ---
 ## OUTPUT FORMAT
@@ -236,7 +262,6 @@ IMPORTANT: You cannot hand off to other specialists. Your role is strictly to in
 - Root cause in network layer: Yes/No/Uncertain
 - Shared context updated: Yes/No (what key)
 """
-
 
 
 # =============================================================================
@@ -249,16 +274,14 @@ DOMAIN_INSTRUCTIONS: dict[DomainType, str] = {
 }
 
 DOMAIN_NAMES: dict[DomainType, str] = {
-    DomainType.COMPUTE: "ComputeSpecialist",
-    DomainType.STORAGE: "StorageSpecialist",
-    DomainType.NETWORK: "NetworkSpecialist",
+    DomainType.COMPUTE: 'ComputeSpecialist',
+    DomainType.STORAGE: 'StorageSpecialist',
+    DomainType.NETWORK: 'NetworkSpecialist',
 }
 
 
 def new_specialist_agent(
-    domain: DomainType,
-    model: str,
-    tools: Optional[List[Callable]] = None
+    domain: DomainType, model: str, tools: list[Callable] | None = None
 ) -> Agent:
     """Create a new domain specialist agent.
 

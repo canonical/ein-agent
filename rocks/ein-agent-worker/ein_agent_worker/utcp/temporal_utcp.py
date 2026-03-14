@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 @dataclasses.dataclass
 class _ListOperationsArguments:
     service_name: str
-    tag: str = ""
+    tag: str = ''
 
 
 @dataclasses.dataclass
@@ -68,55 +68,57 @@ def get_utcp_activities() -> Sequence[Callable]:
         Sequence of activity functions
     """
 
-    @activity.defn(name="utcp-list-operations")
+    @activity.defn(name='utcp-list-operations')
     async def list_operations(args: _ListOperationsArguments) -> str:
         """List all available API operations with optional tag filtering."""
         client = utcp_registry.get_client(args.service_name)
         if not client:
-            return json.dumps({"error": f"UTCP service '{args.service_name}' not found"})
+            return json.dumps({'error': f"UTCP service '{args.service_name}' not found"})
 
         try:
             # Fetch all tools using a broad search
-            all_tools = await client.search_tools(" ", limit=2000)
+            all_tools = await client.search_tools(' ', limit=2000)
 
             # Filter by tag if provided
             if args.tag:
                 tag_lower = args.tag.lower()
                 filtered_tools = [
-                    t for t in all_tools
-                    if hasattr(t, "tags") and any(tag_lower in str(tag).lower() for tag in t.tags)
+                    t
+                    for t in all_tools
+                    if hasattr(t, 'tags') and any(tag_lower in str(tag).lower() for tag in t.tags)
                 ]
             else:
                 filtered_tools = all_tools
 
-            result = []
-            for tool in filtered_tools:
-                result.append({
-                    "name": tool.name,
-                    "tags": tool.tags if hasattr(tool, "tags") else [],
-                    "description": tool.description,
-                })
+            result = [
+                {
+                    'name': tool.name,
+                    'tags': tool.tags if hasattr(tool, 'tags') else [],
+                    'description': tool.description,
+                }
+                for tool in filtered_tools
+            ]
 
             response = {
-                "total": len(result),
-                "operations": result,
+                'total': len(result),
+                'operations': result,
             }
 
             return json.dumps(response, indent=2)
         except Exception as e:
-            logger.error(f"Error listing {args.service_name} operations: {e}")
-            return json.dumps({"error": str(e)})
+            logger.error('Error listing %s operations: %s', args.service_name, e)
+            return json.dumps({'error': str(e)})
 
-    @activity.defn(name="utcp-search-operations")
+    @activity.defn(name='utcp-search-operations')
     async def search_operations(args: _SearchOperationsArguments) -> str:
         """Search for API operations matching the query."""
         client = utcp_registry.get_client(args.service_name)
         if not client:
-            return json.dumps({"error": f"UTCP service '{args.service_name}' not found"})
+            return json.dumps({'error': f"UTCP service '{args.service_name}' not found"})
 
         try:
             # Fetch all tools for client-side scoring
-            all_tools = await client.search_tools(" ", limit=2000)
+            all_tools = await client.search_tools(' ', limit=2000)
 
             query_lower = args.query.lower()
             query_words = query_lower.split()
@@ -124,12 +126,12 @@ def get_utcp_activities() -> Sequence[Callable]:
             scored_tools = []
             for tool in all_tools:
                 name_lower = tool.name.lower()
-                desc_lower = tool.description.lower() if tool.description else ""
+                desc_lower = tool.description.lower() if tool.description else ''
 
                 score = 0
 
                 # Exact name match
-                if query_lower == name_lower.replace(f"{args.service_name}.", ""):
+                if query_lower == name_lower.replace(f'{args.service_name}.', ''):
                     score += 100
 
                 # Partial name match
@@ -153,81 +155,100 @@ def get_utcp_activities() -> Sequence[Callable]:
             # Take top 'limit'
             top_tools = [t[1] for t in scored_tools[: args.limit]]
 
-            result = []
-            for tool in top_tools:
-                result.append(
-                    {
-                        "name": tool.name,
-                        "tags": tool.tags if hasattr(tool, "tags") else [],
-                        "description": tool.description,
-                    }
-                )
+            result = [
+                {
+                    'name': tool.name,
+                    'tags': tool.tags if hasattr(tool, 'tags') else [],
+                    'description': tool.description,
+                }
+                for tool in top_tools
+            ]
 
             return json.dumps(result, indent=2)
         except Exception as e:
-            logger.error(f"Error searching {args.service_name} operations: {e}")
-            return json.dumps({"error": str(e)})
+            logger.error(
+                'Error searching %s operations: %s',
+                args.service_name,
+                e,
+            )
+            return json.dumps({'error': str(e)})
 
-    @activity.defn(name="utcp-get-operation-details")
+    @activity.defn(name='utcp-get-operation-details')
     async def get_operation_details(args: _GetOperationDetailsArguments) -> str:
         """Get detailed parameter schema for a specific operation."""
         client = utcp_registry.get_client(args.service_name)
         if not client:
-            return json.dumps({"error": f"UTCP service '{args.service_name}' not found"})
+            return json.dumps({'error': f"UTCP service '{args.service_name}' not found"})
 
         try:
             tools = await client.search_tools(args.tool_name, limit=10)
 
             for tool in tools:
                 if tool.name == args.tool_name:
-                    schema = _serialize_schema(tool.inputs) if hasattr(tool, "inputs") else {}
+                    schema = _serialize_schema(tool.inputs) if hasattr(tool, 'inputs') else {}
 
                     response = {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "parameters": schema,
+                        'name': tool.name,
+                        'description': tool.description,
+                        'parameters': schema,
                     }
 
                     return json.dumps(response, indent=2)
 
-            return json.dumps({"error": f"Tool '{args.tool_name}' not found."})
+            return json.dumps({'error': f"Tool '{args.tool_name}' not found."})
         except Exception as e:
-            logger.error(f"Error getting {args.service_name} operation details: {e}")
-            return json.dumps({"error": str(e)})
+            logger.error(
+                'Error getting %s operation details: %s',
+                args.service_name,
+                e,
+            )
+            return json.dumps({'error': str(e)})
 
-    @activity.defn(name="utcp-call-operation")
+    @activity.defn(name='utcp-call-operation')
     async def call_operation(args: _CallOperationArguments) -> str:
         """Execute an API operation."""
         client = utcp_registry.get_client(args.service_name)
         if not client:
-            return json.dumps({"error": f"UTCP service '{args.service_name}' not found"})
+            return json.dumps({'error': f"UTCP service '{args.service_name}' not found"})
 
         try:
             # Validate tool name belongs to this service
-            # Tool names should be prefixed with service name (e.g., "kubernetes.listPods")
-            expected_prefix = f"{args.service_name}."
+            expected_prefix = f'{args.service_name}.'
             if not args.tool_name.startswith(expected_prefix):
+                tool_service = args.tool_name.split('.')[0]
                 error_msg = (
-                    f"Tool name mismatch: '{args.tool_name}' does not start with '{expected_prefix}'. "
-                    f"You called 'call_{args.service_name}_operation' but provided a tool from a different service. "
-                    f"Please use the correct tool function: call_{args.tool_name.split('.')[0]}_operation"
+                    f"Tool name mismatch: '{args.tool_name}' does not "
+                    f"start with '{expected_prefix}'. "
+                    f"You called 'call_{args.service_name}_operation' "
+                    f'but provided a tool from a different service. '
+                    f'Please use the correct tool function: '
+                    f'call_{tool_service}_operation'
                 )
-                logger.error(f"[{args.service_name}] {error_msg}")
-                return json.dumps({"error": error_msg})
+                logger.error('[%s] %s', args.service_name, error_msg)
+                return json.dumps({'error': error_msg})
 
-            logger.debug(f"[{args.service_name}] Calling tool: {args.tool_name}")
+            logger.debug(
+                '[%s] Calling tool: %s',
+                args.service_name,
+                args.tool_name,
+            )
             arguments = json.loads(args.arguments) if args.arguments else {}
             result = await client.call_tool(args.tool_name, arguments)
             return _serialize_result(result)
         except json.JSONDecodeError as e:
-            return json.dumps({"error": f"Invalid JSON arguments: {e}"})
+            return json.dumps({'error': f'Invalid JSON arguments: {e}'})
         except Exception as e:
             import traceback
 
             error_msg = str(e) or type(e).__name__
-            logger.error(f"[{args.service_name}] Error calling operation {args.tool_name}: {error_msg}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return json.dumps({"error": error_msg})
+            logger.error(
+                '[%s] Error calling operation %s: %s',
+                args.service_name,
+                args.tool_name,
+                error_msg,
+            )
+            logger.error('Traceback: %s', traceback.format_exc())
+            return json.dumps({'error': error_msg})
 
     return (list_operations, search_operations, get_operation_details, call_operation)
 
@@ -252,42 +273,48 @@ def create_utcp_workflow_tools(
         service_name: UTCP service name (e.g., 'kubernetes')
         service_config: Optional UTCP service configuration (for approval policy)
         config: Optional activity configuration
-        sticky_approvals: Optional shared sticky approvals dict for "always approve/reject"
+        sticky_approvals: Optional shared sticky approvals dict
 
     Returns:
         List of function tools for the agent
     """
-    _config = config or ActivityConfig(start_to_close_timeout=timedelta(seconds=60))
+    activity_config = config or ActivityConfig(start_to_close_timeout=timedelta(seconds=60))
 
     # Create approval checker if service_config is provided
     approval_checker = None
     if service_config:
-        approval_checker = create_approval_checker(service_config, sticky_approvals=sticky_approvals)
+        approval_checker = create_approval_checker(
+            service_config, sticky_approvals=sticky_approvals
+        )
         logger.info(
-            f"[{service_name}] Approval policy: {service_config.approval_policy}"
+            '[%s] Approval policy: %s',
+            service_name,
+            service_config.approval_policy,
         )
 
-    @function_tool(name_override=f"list_{service_name}_operations")
-    async def list_operations(tag: str = "") -> str:
+    @function_tool(name_override=f'list_{service_name}_operations')
+    async def list_operations(tag: str = '') -> str:
         """List all available API operations with optional tag filtering.
 
         Use this to discover what operations are available without searching.
         Returns ALL operations (no pagination).
 
         Args:
-            tag: Optional tag filter (e.g., "v1", "core", "apps"). Leave empty to list all.
+            tag: Optional tag filter (e.g., "v1", "core", "apps").
+                Leave empty to list all.
 
         Returns:
-            JSON list of available operations with their names, tags, and descriptions.
+            JSON list of available operations with their names, tags,
+            and descriptions.
         """
         return await workflow.execute_activity(
-            "utcp-list-operations",
+            'utcp-list-operations',
             _ListOperationsArguments(service_name, tag),
             result_type=str,
-            **_config,
+            **activity_config,
         )
 
-    @function_tool(name_override=f"search_{service_name}_operations")
+    @function_tool(name_override=f'search_{service_name}_operations')
     async def search_operations(query: str, limit: int = 20) -> str:
         """Search for API operations matching the query.
 
@@ -300,53 +327,58 @@ def create_utcp_workflow_tools(
             JSON list of available operations with their names and descriptions.
         """
         return await workflow.execute_activity(
-            "utcp-search-operations",
+            'utcp-search-operations',
             _SearchOperationsArguments(service_name, query, limit),
             result_type=str,
-            **_config,
+            **activity_config,
         )
 
-    @function_tool(name_override=f"get_{service_name}_operation_details")
+    @function_tool(name_override=f'get_{service_name}_operation_details')
     async def get_operation_details(tool_name: str) -> str:
         """Get detailed parameter schema for a specific operation.
 
-        Use this after finding an operation with search to know what parameters it requires.
+        Use this after finding an operation with search to know
+        what parameters it requires.
 
         Args:
-            tool_name: The exact name of the tool (e.g., "kubernetes.listCoreV1NamespacedPod")
+            tool_name: The exact name of the tool
+                (e.g., "kubernetes.listCoreV1NamespacedPod")
 
         Returns:
             JSON schema of the tool's parameters.
         """
         return await workflow.execute_activity(
-            "utcp-get-operation-details",
+            'utcp-get-operation-details',
             _GetOperationDetailsArguments(service_name, tool_name),
             result_type=str,
-            **_config,
+            **activity_config,
         )
 
     @function_tool(
-        name_override=f"call_{service_name}_operation",
-        needs_approval=approval_checker if approval_checker else False
+        name_override=f'call_{service_name}_operation',
+        needs_approval=approval_checker if approval_checker else False,
     )
-    async def call_operation(tool_name: str, arguments: str = "{}") -> str:
-        f"""Execute a {service_name} API operation.
+    async def call_operation(tool_name: str, arguments: str = '{}') -> str:
+        """Execute an API operation.
 
-        IMPORTANT: This tool is ONLY for {service_name} operations. Tool names must start with '{service_name}.'
-        If you need to call operations from other services, use their respective call_*_operation tools.
+        IMPORTANT: This tool is ONLY for operations of this service.
+        Tool names must start with the service prefix.
+        If you need to call operations from other services,
+        use their respective call_*_operation tools.
 
         Args:
-            tool_name: The exact tool name from search results (must start with '{service_name}.')
-            arguments: JSON string of arguments matching the tool's parameter schema
+            tool_name: The exact tool name from search results
+            arguments: JSON string of arguments matching the tool's
+                parameter schema
 
         Returns:
             The result of the API call as JSON
         """
         return await workflow.execute_activity(
-            "utcp-call-operation",
+            'utcp-call-operation',
             _CallOperationArguments(service_name, tool_name, arguments),
             result_type=str,
-            **_config,
+            **activity_config,
         )
 
     return [list_operations, search_operations, get_operation_details, call_operation]
@@ -359,16 +391,14 @@ def create_utcp_workflow_tools(
 
 def _serialize_result(result: Any) -> str:
     """Serialize a result to JSON string."""
-    if isinstance(result, dict):
-        return json.dumps(result, indent=2)
-    elif isinstance(result, list):
+    if isinstance(result, (dict, list)):
         return json.dumps(result, indent=2)
     return str(result)
 
 
 def _serialize_schema(obj: Any) -> dict:
     """Recursively serialize JsonSchema objects to dicts."""
-    if hasattr(obj, "model_dump"):
+    if hasattr(obj, 'model_dump'):
         data = obj.model_dump()
         return _serialize_schema(data)
     elif isinstance(obj, dict):

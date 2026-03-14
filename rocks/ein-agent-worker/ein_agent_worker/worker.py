@@ -4,20 +4,21 @@ import asyncio
 import logging
 import os
 from datetime import timedelta
+
 from temporalio.client import Client
 from temporalio.common import RetryPolicy
+from temporalio.contrib.openai_agents import ModelActivityParameters, OpenAIAgentsPlugin
 from temporalio.worker import Worker
 
+from ein_agent_worker.activities.alertmanager import fetch_alerts_activity
+from ein_agent_worker.activities.worker_config import load_utcp_config, load_worker_model
 from ein_agent_worker.models.gemini_litellm_provider import GeminiCompatibleLitellmProvider
 from ein_agent_worker.models.hitl import DEFAULT_MODEL
-from ein_agent_worker.activities.alertmanager import fetch_alerts_activity
-from ein_agent_worker.activities.worker_config import load_worker_model, load_utcp_config
-from ein_agent_worker.workflows.human_in_the_loop import HumanInTheLoopWorkflow
+from ein_agent_worker.utcp import registry as utcp_registry
 from ein_agent_worker.utcp.config import UTCPConfig
 from ein_agent_worker.utcp.loader import ToolLoader
-from ein_agent_worker.utcp import registry as utcp_registry
 from ein_agent_worker.utcp.temporal_utcp import get_utcp_activities
-from temporalio.contrib.openai_agents import OpenAIAgentsPlugin, ModelActivityParameters
+from ein_agent_worker.workflows.human_in_the_loop import HumanInTheLoopWorkflow
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -32,10 +33,10 @@ async def initialize_utcp_clients() -> None:
     config = UTCPConfig.from_env()
 
     if not config.enabled_services:
-        logger.info("No UTCP services configured")
+        logger.info('No UTCP services configured')
         return
 
-    logger.info(f"Initializing {len(config.enabled_services)} UTCP service(s)")
+    logger.info('Initializing %d UTCP service(s)', len(config.enabled_services))
     loader = ToolLoader()
 
     for svc in config.enabled_services:
@@ -52,18 +53,22 @@ async def initialize_utcp_clients() -> None:
             # Register client along with its config (for approval policy)
             utcp_registry.register_client(svc.name, client, config=svc)
         except Exception as e:
-            logger.error(f"Failed to initialize UTCP client for {svc.name}: {e}")
+            logger.error(
+                'Failed to initialize UTCP client for %s: %s',
+                svc.name,
+                e,
+            )
 
 
 async def main():
     """Start the Temporal worker."""
     # Get config from environment (injected by temporal-worker-k8s-operator)
-    host = os.getenv("TEMPORAL_HOST", "localhost:7233")
-    namespace = os.getenv("TEMPORAL_NAMESPACE", "default")
-    queue = os.getenv("TEMPORAL_QUEUE", "ein-agent-queue")
-    model = os.getenv("EIN_AGENT_MODEL", DEFAULT_MODEL)
+    host = os.getenv('TEMPORAL_HOST', 'localhost:7233')
+    namespace = os.getenv('TEMPORAL_NAMESPACE', 'default')
+    queue = os.getenv('TEMPORAL_QUEUE', 'ein-agent-queue')
+    model = os.getenv('EIN_AGENT_MODEL', DEFAULT_MODEL)
 
-    logger.info(f"Using LLM model: {model}")
+    logger.info('Using LLM model: %s', model)
 
     # Initialize UTCP clients at startup (before workflows run)
     # This allows network I/O outside the Temporal sandbox
@@ -105,9 +110,9 @@ async def main():
         ],
     )
 
-    logger.info("Worker started successfully on queue: %s", queue)
+    logger.info('Worker started successfully on queue: %s', queue)
     await worker.run()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     asyncio.run(main())

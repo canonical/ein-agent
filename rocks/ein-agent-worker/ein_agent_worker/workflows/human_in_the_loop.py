@@ -9,72 +9,87 @@ A simple conversational workflow where:
 """
 
 from datetime import timedelta
+from typing import ClassVar
 
-from agents import Agent, Runner, RunConfig, function_tool
+from agents import Agent, RunConfig, Runner, function_tool
 from temporalio import workflow
 
 from ein_agent_worker.models import (
-    SharedContext,
-    WorkflowStatus,
+    ApprovalDecision,
     ChatMessage,
-    WorkflowState,
     HITLConfig,
+    SharedContext,
     WorkflowEvent,
     WorkflowEventType,
     WorkflowInterruption,
-    ApprovalDecision,
+    WorkflowState,
+    WorkflowStatus,
 )
 
 with workflow.unsafe.imports_passed_through():
-    from ein_agent_worker.models.gemini_litellm_provider import GeminiCompatibleLitellmProvider
     from ein_agent_worker.activities.worker_config import load_worker_model
-    from ein_agent_worker.workflows.agents.specialists import (
-        DomainType,
-        new_specialist_agent,
-        DOMAIN_UTCP_SERVICES,
-    )
+    from ein_agent_worker.models.gemini_litellm_provider import GeminiCompatibleLitellmProvider
+    from ein_agent_worker.utcp import registry as utcp_registry
+    from ein_agent_worker.utcp.temporal_utcp import create_utcp_workflow_tools
     from ein_agent_worker.workflows.agents.shared_context_tools import (
         create_shared_context_tools,
     )
-    from ein_agent_worker.utcp import registry as utcp_registry
-    from ein_agent_worker.utcp.temporal_utcp import create_utcp_workflow_tools
+    from ein_agent_worker.workflows.agents.specialists import (
+        DOMAIN_UTCP_SERVICES,
+        DomainType,
+        new_specialist_agent,
+    )
 
 # =============================================================================
 # Investigation Agent Prompt
 # =============================================================================
 # ... (Prompt string kept as is)
-INVESTIGATION_AGENT_PROMPT = """You are the Investigation Assistant (The Orchestrator).
+INVESTIGATION_AGENT_PROMPT = """\
+You are the Investigation Assistant (The Orchestrator).
 
 ## Your Capabilities
 - **Fetch Alerts**: Use `fetch_alerts` to get current firing alerts.
 - **Direct Infrastructure Access**: You have UTCP tools to query infrastructure directly:
-  - **Kubernetes**: Use `search_kubernetes_operations`, `get_kubernetes_operation_details`, `call_kubernetes_operation`
-  - **Grafana**: Use `search_grafana_operations`, `get_grafana_operation_details`, `call_grafana_operation`
-  - **Ceph** (if enabled): Use `search_ceph_operations`, `get_ceph_operation_details`, `call_ceph_operation`
+  - **Kubernetes**: Use `search_kubernetes_operations`, \
+`get_kubernetes_operation_details`, `call_kubernetes_operation`
+  - **Grafana**: Use `search_grafana_operations`, \
+`get_grafana_operation_details`, `call_grafana_operation`
+  - **Ceph** (if enabled): Use `search_ceph_operations`, \
+`get_ceph_operation_details`, `call_ceph_operation`
 - **Consult Domain Specialists**: For deep technical investigations, hand off to specialists:
-  - **ComputeSpecialist**: For complex Kubernetes/Grafana investigations requiring domain expertise.
+  - **ComputeSpecialist**: For complex Kubernetes/Grafana investigations \
+requiring domain expertise.
   - **StorageSpecialist**: For complex Ceph/storage investigations requiring domain expertise.
   - **NetworkSpecialist**: For complex networking investigations requiring domain expertise.
-- **Shared Context**: Use `get_shared_context`, `update_shared_context`, and `group_findings` to manage investigation findings.
+- **Shared Context**: Use `get_shared_context`, `update_shared_context`, \
+and `group_findings` to manage investigation findings.
 - **Ask User**: Ask for clarification or provide updates using `ask_user`.
-- **Print Findings Report**: Use `print_findings_report` to generate a formatted summary of all investigation findings.
+- **Print Findings Report**: Use `print_findings_report` to generate a \
+formatted summary of all investigation findings.
 
 ## Your Workflow
-1. **Analyze User Request**: Determine if the user wants to investigate a specific alert or has a general infrastructure question.
+1. **Analyze User Request**: Determine if the user wants to investigate a \
+specific alert or has a general infrastructure question.
 2. **Answer Simple Queries Directly**: For straightforward requests, use UTCP tools directly:
-   - "list grafana dashboards" → Use `search_grafana_operations` + `call_grafana_operation`
-   - "show kubernetes pods" → Use `search_kubernetes_operations` + `call_kubernetes_operation`
-   - "check ceph health" → Use `search_ceph_operations` + `call_ceph_operation`
-3. **Delegate Complex Investigations**: For multi-step investigations requiring domain expertise, hand off to specialists:
-   - Example: "investigate why storage is slow" → Delegate to StorageSpecialist
-4. **Synthesize & Group**: As findings accumulate, use `group_findings` to consolidate related findings.
+   - "list grafana dashboards" -> Use `search_grafana_operations` + `call_grafana_operation`
+   - "show kubernetes pods" -> Use `search_kubernetes_operations` + `call_kubernetes_operation`
+   - "check ceph health" -> Use `search_ceph_operations` + `call_ceph_operation`
+3. **Delegate Complex Investigations**: For multi-step investigations \
+requiring domain expertise, hand off to specialists:
+   - Example: "investigate why storage is slow" -> Delegate to StorageSpecialist
+4. **Synthesize & Group**: As findings accumulate, use `group_findings` \
+to consolidate related findings.
 5. **Report**: Use `print_findings_report` to show the current status.
-6. **Ongoing Support**: You are an always-on assistant. Do not close the session unless the user explicitly asks to stop.
+6. **Ongoing Support**: You are an always-on assistant. Do not close the \
+session unless the user explicitly asks to stop.
 
 ## CRITICAL RULES
-- **USE UTCP TOOLS DIRECTLY**: For simple queries (list, show, get), use your UTCP tools directly. No need to delegate.
-- **DELEGATE FOR DEEP ANALYSIS**: Only hand off to specialists for complex investigations requiring domain expertise.
-- **HANDOFFS**: Use the standard transfer tools to delegate (e.g., `transfer_to_computespecialist`).
+- **USE UTCP TOOLS DIRECTLY**: For simple queries (list, show, get), \
+use your UTCP tools directly. No need to delegate.
+- **DELEGATE FOR DEEP ANALYSIS**: Only hand off to specialists for complex \
+investigations requiring domain expertise.
+- **HANDOFFS**: Use the standard transfer tools to delegate \
+(e.g., `transfer_to_computespecialist`).
 - **OUTPUTTING REPORTS**: Always output the content of `print_findings_report` to the user.
 """
 
@@ -84,7 +99,11 @@ class HumanInTheLoopWorkflow:
     """Simple conversational investigation workflow."""
 
     # List of available specialist agents for user selection
-    AVAILABLE_SPECIALISTS = ["ComputeSpecialist", "StorageSpecialist", "NetworkSpecialist"]
+    AVAILABLE_SPECIALISTS: ClassVar[list[str]] = [
+        'ComputeSpecialist',
+        'StorageSpecialist',
+        'NetworkSpecialist',
+    ]
 
     def __init__(self):
         self._state = WorkflowState()
@@ -102,39 +121,32 @@ class HumanInTheLoopWorkflow:
     @workflow.signal
     async def send_message(self, message: str) -> None:
         """User sends a message to the agent."""
-        workflow.logger.info(f"Received user message: {message[:100]}...")
+        workflow.logger.info(f'Received user message: {message[:100]}...')
         self._state.messages.append(
-            ChatMessage(role="user", content=message, timestamp=workflow.now())
+            ChatMessage(role='user', content=message, timestamp=workflow.now())
         )
         self._event_queue.append(
             WorkflowEvent(
-                type=WorkflowEventType.MESSAGE,
-                payload=message,
-                timestamp=workflow.now()
+                type=WorkflowEventType.MESSAGE, payload=message, timestamp=workflow.now()
             )
         )
 
     @workflow.signal
     async def end_workflow(self) -> None:
         """User wants to end the conversation."""
-        workflow.logger.info("End workflow signal received")
+        workflow.logger.info('End workflow signal received')
         self._should_end = True
         self._event_queue.append(
-            WorkflowEvent(
-                type=WorkflowEventType.STOP,
-                timestamp=workflow.now()
-            )
+            WorkflowEvent(type=WorkflowEventType.STOP, timestamp=workflow.now())
         )
 
     @workflow.signal
     async def provide_confirmation(self, confirmed: bool) -> None:
         """User provides confirmation for a pending action."""
-        workflow.logger.info(f"Received confirmation: {confirmed}")
+        workflow.logger.info(f'Received confirmation: {confirmed}')
         self._event_queue.append(
             WorkflowEvent(
-                type=WorkflowEventType.CONFIRMATION,
-                payload=confirmed,
-                timestamp=workflow.now()
+                type=WorkflowEventType.CONFIRMATION, payload=confirmed, timestamp=workflow.now()
             )
         )
 
@@ -145,12 +157,12 @@ class HumanInTheLoopWorkflow:
         Args:
             selected_agent: Name of the selected agent, or empty string to cancel.
         """
-        workflow.logger.info(f"Received agent selection: {selected_agent}")
+        workflow.logger.info(f'Received agent selection: {selected_agent}')
         self._event_queue.append(
             WorkflowEvent(
                 type=WorkflowEventType.SELECTION,
                 payload=selected_agent if selected_agent else None,
-                timestamp=workflow.now()
+                timestamp=workflow.now(),
             )
         )
 
@@ -161,12 +173,10 @@ class HumanInTheLoopWorkflow:
         Args:
             decisions: List of ApprovalDecision dicts
         """
-        workflow.logger.info(f"Received {len(decisions)} approval decision(s)")
+        workflow.logger.info(f'Received {len(decisions)} approval decision(s)')
         self._event_queue.append(
             WorkflowEvent(
-                type=WorkflowEventType.CONFIRMATION,
-                payload=decisions,
-                timestamp=workflow.now()
+                type=WorkflowEventType.CONFIRMATION, payload=decisions, timestamp=workflow.now()
             )
         )
 
@@ -177,12 +187,12 @@ class HumanInTheLoopWorkflow:
     @workflow.query
     def get_state(self) -> dict:
         """Get current workflow state."""
-        return self._state.model_dump(mode="json")
+        return self._state.model_dump(mode='json')
 
     @workflow.query
     def get_messages(self) -> list[dict]:
         """Get conversation history."""
-        return [m.model_dump(mode="json") for m in self._state.messages]
+        return [m.model_dump(mode='json') for m in self._state.messages]
 
     @workflow.query
     def get_status(self) -> str:
@@ -204,7 +214,9 @@ class HumanInTheLoopWorkflow:
             event = await self._next_event()
             if event.type == event_type or event.type == WorkflowEventType.STOP:
                 return event
-            workflow.logger.info(f"Ignoring event type {event.type} while waiting for {event_type}")
+            workflow.logger.info(
+                f'Ignoring event type {event.type} while waiting for {event_type}'
+            )
 
     # =========================================================================
     # Main workflow
@@ -229,14 +241,14 @@ class HumanInTheLoopWorkflow:
             self._config = config
 
         self._state.status = WorkflowStatus.RUNNING
-        workflow.logger.info("Human-in-the-loop workflow started")
+        workflow.logger.info('Human-in-the-loop workflow started')
 
         # Load worker model configuration from environment
         self._config.model = await workflow.execute_activity(
             load_worker_model,
             start_to_close_timeout=timedelta(seconds=10),
         )
-        workflow.logger.info(f"Using model: {self._config.model}")
+        workflow.logger.info(f'Using model: {self._config.model}')
 
         # Setup run config
         self._run_config = RunConfig(
@@ -254,40 +266,36 @@ class HumanInTheLoopWorkflow:
         if initial_message:
             # Add to messages and push a dummy event to trigger the first turn
             self._state.messages.append(
-                ChatMessage(
-                    role="user", content=initial_message, timestamp=workflow.now()
-                )
+                ChatMessage(role='user', content=initial_message, timestamp=workflow.now())
             )
             self._event_queue.append(
                 WorkflowEvent(
                     type=WorkflowEventType.MESSAGE,
                     payload=initial_message,
-                    timestamp=workflow.now()
+                    timestamp=workflow.now(),
                 )
             )
         else:
             # No initial message - produce a greeting
             greeting = (
                 "Hello! I'm your infrastructure investigation assistant. "
-                "I can help you investigate alerts and infrastructure issues.\n\n"
-                "You can:\n"
-                "- Ask me to fetch and investigate current alerts\n"
+                'I can help you investigate alerts and infrastructure issues.\n\n'
+                'You can:\n'
+                '- Ask me to fetch and investigate current alerts\n'
                 "- Describe an issue you're experiencing\n"
-                "- Ask questions about your infrastructure\n\n"
-                "How can I help today?"
+                '- Ask questions about your infrastructure\n\n'
+                'How can I help today?'
             )
             self._state.messages.append(
-                ChatMessage(
-                    role="assistant", content=greeting, timestamp=workflow.now()
-                )
+                ChatMessage(role='assistant', content=greeting, timestamp=workflow.now())
             )
-            workflow.logger.info("Sent initial greeting")
+            workflow.logger.info('Sent initial greeting')
 
         # Conversation loop
         turn_count = 0
         while not self._should_end and turn_count < self._config.max_turns:
             # Wait for user input (MESSAGE or STOP)
-            workflow.logger.info("Waiting for user message...")
+            workflow.logger.info('Waiting for user message...')
             event = await self._wait_for_event_type(WorkflowEventType.MESSAGE)
 
             if self._should_end or event.type == WorkflowEventType.STOP:
@@ -297,7 +305,7 @@ class HumanInTheLoopWorkflow:
             # Build conversation history for the agent
             conversation = self._build_conversation_input()
 
-            workflow.logger.info(f"Running agent turn {turn_count}")
+            workflow.logger.info(f'Running agent turn {turn_count}')
 
             try:
                 # Run the agent
@@ -310,16 +318,18 @@ class HumanInTheLoopWorkflow:
 
                 # Handle interruptions (tool approvals, etc.)
                 while result.interruptions:
-                    workflow.logger.info(f"Agent execution interrupted: {len(result.interruptions)} interruption(s)")
+                    workflow.logger.info(
+                        'Agent execution interrupted: %d interruption(s)',
+                        len(result.interruptions),
+                    )
 
                     # Convert SDK interruptions to our WorkflowInterruption model
                     self._state.interruptions = [
-                        self._convert_sdk_interruption(i, agent.name)
-                        for i in result.interruptions
+                        self._convert_sdk_interruption(i, agent.name) for i in result.interruptions
                     ]
 
                     # Wait for approval decisions from user
-                    workflow.logger.info("Waiting for approval decisions...")
+                    workflow.logger.info('Waiting for approval decisions...')
                     event = await self._wait_for_event_type(WorkflowEventType.CONFIRMATION)
 
                     if self._should_end or event.type == WorkflowEventType.STOP:
@@ -328,12 +338,12 @@ class HumanInTheLoopWorkflow:
                     # Process approval decisions
                     decisions_data = event.payload
                     if not decisions_data:
-                        workflow.logger.warning("No decisions provided, rejecting all")
+                        workflow.logger.warning('No decisions provided, rejecting all')
                         decisions_data = []
 
                     # Parse decisions
                     decisions = [ApprovalDecision(**d) for d in decisions_data]
-                    workflow.logger.info(f"Processing {len(decisions)} approval decision(s)")
+                    workflow.logger.info(f'Processing {len(decisions)} approval decision(s)')
 
                     # Apply decisions and update cache
                     state = self._apply_approval_decisions(result, decisions)
@@ -352,34 +362,31 @@ class HumanInTheLoopWorkflow:
                 if self._should_end:
                     break
 
-                response = result.final_output or "I encountered an issue processing your request."
+                response = result.final_output or 'I encountered an issue processing your request.'
 
                 # Add agent response to history
                 self._state.messages.append(
-                    ChatMessage(
-                        role="assistant", content=response, timestamp=workflow.now()
-                    )
+                    ChatMessage(role='assistant', content=response, timestamp=workflow.now())
                 )
 
-                workflow.logger.info(f"Agent response: {response[:200]}...")
-
+                workflow.logger.info(f'Agent response: {response[:200]}...')
 
             except Exception as e:
-                workflow.logger.error(f"Agent error: {e}")
-                error_msg = f"I encountered an error: {str(e)}. Please try again or rephrase your request."
+                workflow.logger.error(f'Agent error: {e}')
+                error_msg = (
+                    f'I encountered an error: {e!s}. Please try again or rephrase your request.'
+                )
                 self._state.messages.append(
-                    ChatMessage(
-                        role="assistant", content=error_msg, timestamp=workflow.now()
-                    )
+                    ChatMessage(role='assistant', content=error_msg, timestamp=workflow.now())
                 )
 
         # Workflow ended
         if self._should_end:
             self._state.status = WorkflowStatus.ENDED
-            return "Investigation ended by user."
+            return 'Investigation ended by user.'
         else:
             self._state.status = WorkflowStatus.COMPLETED
-            return "Investigation completed (max turns reached)."
+            return 'Investigation completed (max turns reached).'
 
     # =========================================================================
     # Agent Creation
@@ -398,27 +405,28 @@ class HumanInTheLoopWorkflow:
         services = utcp_registry.list_services()
 
         if not services:
-            workflow.logger.info("No UTCP services registered")
+            workflow.logger.info('No UTCP services registered')
             return
 
-        workflow.logger.info(f"Creating tools for {len(services)} UTCP service(s)")
+        workflow.logger.info(f'Creating tools for {len(services)} UTCP service(s)')
 
         for service_name in services:
             # Get service config for approval policy
             service_config = utcp_registry.get_service_config(service_name)
 
             # Create workflow tools that execute as activities
-            # Pass sticky_approvals dict so tools can check for cached decisions
-            # Since dicts are mutable, updates to sticky_approvals will be visible to approval checkers
+            # Pass sticky_approvals dict so tools can check
+            # for cached decisions. Since dicts are mutable,
+            # updates will be visible to approval checkers.
             tools = create_utcp_workflow_tools(
                 service_name,
                 service_config=service_config,
-                sticky_approvals=self._state.sticky_approvals
+                sticky_approvals=self._state.sticky_approvals,
             )
             self._utcp_tools[service_name] = tools
             workflow.logger.info(
-                f"Created {len(tools)} tools for {service_name}: "
-                f"{[getattr(t, 'name', str(t)) for t in tools]}"
+                f'Created {len(tools)} tools for {service_name}: '
+                f'{[getattr(t, "name", str(t)) for t in tools]}'
             )
 
     def _get_domain_utcp_tools(self, domain: DomainType) -> list:
@@ -452,32 +460,33 @@ class HumanInTheLoopWorkflow:
             WorkflowInterruption instance
         """
         # Generate unique ID for this interruption
-        interruption_id = f"{sdk_interruption.tool_name}:{sdk_interruption.call_id}"
+        interruption_id = f'{sdk_interruption.tool_name}:{sdk_interruption.call_id}'
 
         # Parse arguments - might be dict, string, or None
         arguments = sdk_interruption.arguments
         if isinstance(arguments, str):
             import json
+
             try:
                 arguments = json.loads(arguments)
             except json.JSONDecodeError:
-                workflow.logger.warning(f"Failed to parse arguments as JSON: {arguments}")
-                arguments = {"raw": arguments}
+                workflow.logger.warning(f'Failed to parse arguments as JSON: {arguments}')
+                arguments = {'raw': arguments}
         elif arguments is None:
             arguments = {}
         elif not isinstance(arguments, dict):
             # Some other type, wrap it
-            arguments = {"value": arguments}
+            arguments = {'value': arguments}
 
         return WorkflowInterruption(
             id=interruption_id,
-            type="tool_approval",
+            type='tool_approval',
             agent_name=agent_name,
             tool_name=sdk_interruption.tool_name,
             arguments=arguments,
             context={
-                "call_id": sdk_interruption.call_id,
-                "description": f"Tool call: {sdk_interruption.tool_name}",
+                'call_id': sdk_interruption.call_id,
+                'description': f'Tool call: {sdk_interruption.tool_name}',
             },
             timestamp=workflow.now(),
         )
@@ -500,31 +509,31 @@ class HumanInTheLoopWorkflow:
 
         # Find matching SDK interruptions and approve/reject
         for interruption in result.interruptions:
-            interruption_id = f"{interruption.tool_name}:{interruption.call_id}"
+            interruption_id = f'{interruption.tool_name}:{interruption.call_id}'
 
             decision = decision_map.get(interruption_id)
             if not decision:
                 # No decision provided, reject by default
-                workflow.logger.warning(f"No decision for {interruption_id}, rejecting")
+                workflow.logger.warning(f'No decision for {interruption_id}, rejecting')
                 state.reject(interruption)
                 continue
 
             if decision.approved:
-                workflow.logger.info(f"Approving: {interruption.tool_name}")
+                workflow.logger.info(f'Approving: {interruption.tool_name}')
                 state.approve(interruption)
 
                 # Store sticky approval if "always approve"
                 if decision.always:
                     self._state.sticky_approvals[interruption.tool_name] = True
-                    workflow.logger.info(f"Sticky approval stored for {interruption.tool_name}")
+                    workflow.logger.info(f'Sticky approval stored for {interruption.tool_name}')
             else:
-                workflow.logger.info(f"Rejecting: {interruption.tool_name}")
+                workflow.logger.info(f'Rejecting: {interruption.tool_name}')
                 state.reject(interruption)
 
                 # Store sticky rejection if "always reject"
                 if decision.always:
                     self._state.sticky_approvals[interruption.tool_name] = False
-                    workflow.logger.info(f"Sticky rejection stored for {interruption.tool_name}")
+                    workflow.logger.info(f'Sticky rejection stored for {interruption.tool_name}')
 
         return state
 
@@ -536,46 +545,46 @@ class HumanInTheLoopWorkflow:
         """Create the investigation agent with specialists."""
         # Create shared context tools for the Orchestrator
         update_tool, get_tool, print_report_tool, group_tool = create_shared_context_tools(
-            self._shared_context, agent_name="InvestigationAgent"
+            self._shared_context, agent_name='InvestigationAgent'
         )
 
         # Collect ALL UTCP tools for the main agent (for simple queries)
         all_utcp_tools = []
         for service_name in self._utcp_tools:
             all_utcp_tools.extend(self._utcp_tools[service_name])
-        workflow.logger.info(f"Investigation Agent has {len(all_utcp_tools)} UTCP tools")
+        workflow.logger.info(f'Investigation Agent has {len(all_utcp_tools)} UTCP tools')
 
         # Create tools for ComputeSpecialist (shared context + UTCP tools)
         comp_update, comp_get, comp_print, comp_group = create_shared_context_tools(
-            self._shared_context, agent_name="ComputeSpecialist"
+            self._shared_context, agent_name='ComputeSpecialist'
         )
         compute_utcp_tools = self._get_domain_utcp_tools(DomainType.COMPUTE)
         compute_spec = new_specialist_agent(
             domain=DomainType.COMPUTE,
             model=self._config.model,
-            tools=[comp_update, comp_get, comp_print, comp_group] + compute_utcp_tools,
+            tools=[comp_update, comp_get, comp_print, comp_group, *compute_utcp_tools],
         )
 
         # Create tools for StorageSpecialist (shared context + UTCP tools)
         stor_update, stor_get, stor_print, stor_group = create_shared_context_tools(
-            self._shared_context, agent_name="StorageSpecialist"
+            self._shared_context, agent_name='StorageSpecialist'
         )
         storage_utcp_tools = self._get_domain_utcp_tools(DomainType.STORAGE)
         storage_spec = new_specialist_agent(
             domain=DomainType.STORAGE,
             model=self._config.model,
-            tools=[stor_update, stor_get, stor_print, stor_group] + storage_utcp_tools,
+            tools=[stor_update, stor_get, stor_print, stor_group, *storage_utcp_tools],
         )
 
         # Create tools for NetworkSpecialist (shared context + UTCP tools)
         net_update, net_get, net_print, net_group = create_shared_context_tools(
-            self._shared_context, agent_name="NetworkSpecialist"
+            self._shared_context, agent_name='NetworkSpecialist'
         )
         network_utcp_tools = self._get_domain_utcp_tools(DomainType.NETWORK)
         network_spec = new_specialist_agent(
             domain=DomainType.NETWORK,
             model=self._config.model,
-            tools=[net_update, net_get, net_print, net_group] + network_utcp_tools,
+            tools=[net_update, net_get, net_print, net_group, *network_utcp_tools],
         )
 
         # Create tools
@@ -584,7 +593,7 @@ class HumanInTheLoopWorkflow:
 
         # Create main investigation agent with ALL UTCP tools for direct queries
         agent = Agent(
-            name="InvestigationAgent",
+            name='InvestigationAgent',
             model=self._config.model,
             instructions=INVESTIGATION_AGENT_PROMPT,
             tools=[
@@ -594,7 +603,8 @@ class HumanInTheLoopWorkflow:
                 get_tool,
                 update_tool,
                 group_tool,
-            ] + all_utcp_tools,  # Add all UTCP tools for direct access
+                *all_utcp_tools,  # Add all UTCP tools for direct access
+            ],
             handoffs=[compute_spec, storage_spec, network_spec],
         )
 
@@ -620,7 +630,7 @@ class HumanInTheLoopWorkflow:
             Args:
                 question: The question to ask the user.
             """
-            workflow.logger.info(f"ask_user called: {question}")
+            workflow.logger.info(f'ask_user called: {question}')
 
             # Set pending question in state for UI
             workflow_ref._state.pending_question = question
@@ -632,10 +642,10 @@ class HumanInTheLoopWorkflow:
             workflow_ref._state.pending_question = None
 
             if event.type == WorkflowEventType.STOP:
-                return "User ended the conversation."
+                return 'User ended the conversation.'
 
-            response = event.payload or ""
-            workflow.logger.info(f"User responded to ask_user: {response[:100]}...")
+            response = event.payload or ''
+            workflow.logger.info(f'User responded to ask_user: {response[:100]}...')
             return response
 
         return ask_user
@@ -645,47 +655,46 @@ class HumanInTheLoopWorkflow:
 
         @function_tool
         async def fetch_alerts(
-            status: str = "firing",
+            status: str = 'firing',
             alertname: str | None = None,
         ) -> str:
             """Fetch alerts from Alertmanager."""
-            workflow.logger.info(f"fetch_alerts called: status={status}, alertname={alertname}")
+            workflow.logger.info(f'fetch_alerts called: status={status}, alertname={alertname}')
 
             params = {
-                "alertmanager_url": self._config.alertmanager_url,
-                "status": status,
-                "alertname": alertname,
+                'alertmanager_url': self._config.alertmanager_url,
+                'status': status,
+                'alertname': alertname,
             }
 
             try:
                 alerts = await workflow.execute_activity(
-                    "fetch_alerts_activity",
+                    'fetch_alerts_activity',
                     params,
                     start_to_close_timeout=timedelta(seconds=60),
                 )
                 self._state.last_fetched_alerts = alerts
             except Exception as e:
-                workflow.logger.error(f"Failed to fetch alerts: {e}")
-                return f"Error: Failed to fetch alerts from Alertmanager: {e}"
+                workflow.logger.error(f'Failed to fetch alerts: {e}')
+                return f'Error: Failed to fetch alerts from Alertmanager: {e}'
 
             if not alerts:
-                return f"No {status} alerts found" + (f" for '{alertname}'." if alertname else ".")
+                return f'No {status} alerts found' + (f" for '{alertname}'." if alertname else '.')
 
-            lines = [ f"Found {len(alerts)} {status} alerts:" ]
+            lines = [f'Found {len(alerts)} {status} alerts:']
             for alert in alerts:
-                labels = alert.get("labels", {})
-                name = labels.get("alertname", "N/A")
-                fingerprint = alert.get("fingerprint", "N/A")
-                summary = alert.get("annotations", {}).get("summary", "No summary.")
-                lines.append(f"- **{name}** (Fingerprint: `{fingerprint}`): {summary}")
+                labels = alert.get('labels', {})
+                name = labels.get('alertname', 'N/A')
+                fingerprint = alert.get('fingerprint', 'N/A')
+                summary = alert.get('annotations', {}).get('summary', 'No summary.')
+                lines.append(f'- **{name}** (Fingerprint: `{fingerprint}`): {summary}')
                 for key, value in labels.items():
-                    if key not in ["alertname", "severity"]:
-                        lines.append(f"  - {key}: {value}")
+                    if key not in ['alertname', 'severity']:
+                        lines.append(f'  - {key}: {value}')
 
-            return "\n".join(lines)
+            return '\n'.join(lines)
 
         return fetch_alerts
-
 
     # =========================================================================
     # Helpers
@@ -696,15 +705,13 @@ class HumanInTheLoopWorkflow:
         if not self._state.messages:
             return "Hello, I'm ready to help investigate infrastructure issues."
 
-        lines = ["## Conversation History\n"]
+        lines = ['## Conversation History\n']
         for msg in self._state.messages[-10:]:
-            role = "User" if msg.role == "user" else "Assistant"
-            lines.append(f"**{role}:** {msg.content}\n")
+            role = 'User' if msg.role == 'user' else 'Assistant'
+            lines.append(f'**{role}:** {msg.content}\n')
 
         if self._shared_context.findings:
-            lines.append("\n## Current Investigation Findings\n")
+            lines.append('\n## Current Investigation Findings\n')
             lines.append(self._shared_context.format_summary())
 
-        return "\n".join(lines)
-
-
+        return '\n'.join(lines)

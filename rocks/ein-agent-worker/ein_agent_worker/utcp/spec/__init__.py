@@ -9,10 +9,10 @@ from ein_agent_worker.utcp.spec.strategy import (
 )
 
 __all__ = [
-    "LiveURLStrategy",
-    "LocalFileStrategy",
-    "SpecSource",
-    "SpecSourceStrategy",
-    "find_spec_file",
-    "strip_openapi_suffix",
+    'LiveURLStrategy',
+    'LocalFileStrategy',
+    'SpecSource',
+    'SpecSourceStrategy',
+    'find_spec_file',
+    'strip_openapi_suffix',
 ]

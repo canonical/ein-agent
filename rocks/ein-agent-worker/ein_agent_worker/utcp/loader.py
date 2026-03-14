@@ -8,12 +8,12 @@ import base64
 import json
 import logging
 import os
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import ClassVar
 
 import yaml
 from agents import function_tool
-from utcp.utcp_client import UtcpClient
 
 from ein_agent_worker.utcp.local_file_protocol import (
     register_local_file_protocol,
@@ -25,16 +25,17 @@ from ein_agent_worker.utcp.openapi_handlers import (
 )
 from ein_agent_worker.utcp.openapi_handlers.default import DefaultOpenApiHandler
 from ein_agent_worker.utcp.spec.strategy import (
-    LocalFileStrategy,
     LiveURLStrategy,
+    LocalFileStrategy,
     SpecSourceStrategy,
 )
 from ein_agent_worker.utcp.ssl_config import SSLConfigManager
+from utcp.utcp_client import UtcpClient
 
 logger = logging.getLogger(__name__)
 
 # Default specs directory (relative to this file)
-DEFAULT_SPECS_DIR = Path(__file__).parent.parent.parent / "specs"
+DEFAULT_SPECS_DIR = Path(__file__).parent.parent.parent / 'specs'
 
 
 def _serialize_result(result) -> str:
@@ -44,7 +45,7 @@ def _serialize_result(result) -> str:
     return str(result)
 
 
-def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callable]:
+def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> list[Callable]:
     """Create UTCP tools with the client captured in closures.
 
     This follows the operator-agent-poc pattern with 4 tools:
@@ -61,26 +62,31 @@ def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callab
         List of function tools for the agent
     """
     # Cache for all available tools (populated lazily on first use)
-    _tools_cache: Optional[List] = None
+    tools_cache: list | None = None
 
     async def _get_all_tools():
         """Get all tools with caching to avoid repeated fetches."""
-        nonlocal _tools_cache
-        if _tools_cache is None:
-            logger.info(f"[{service_name}] Loading all operations into cache (one-time operation)")
-            _tools_cache = await utcp_client.search_tools(" ", limit=2000)
-            logger.info(f"[{service_name}] Cached {len(_tools_cache)} operations")
-        return _tools_cache
+        nonlocal tools_cache
+        if tools_cache is None:
+            logger.info(
+                '[%s] Loading all operations into cache (one-time operation)',
+                service_name,
+            )
+            tools_cache = await utcp_client.search_tools(' ', limit=2000)
+            logger.info('[%s] Cached %d operations', service_name, len(tools_cache))
+        return tools_cache
 
-    @function_tool(name_override=f"list_{service_name}_operations")
-    async def list_operations(tag: str = "", page: int = 1) -> str:
+    @function_tool(name_override=f'list_{service_name}_operations')
+    async def list_operations(tag: str = '', page: int = 1) -> str:
         """List available API operations with optional tag filtering and pagination.
 
-        Use this to discover what operations are available. Returns only operation names as plain text.
+        Use this to discover what operations are available.
+        Returns only operation names as plain text.
         For details about specific operations, use get_{service}_operation_details.
 
         Args:
-            tag: Optional tag filter (e.g., "v1", "core", "apps"). Leave empty to list all.
+            tag: Optional tag filter (e.g., "v1", "core", "apps").
+                Leave empty to list all.
             page: Page number starting from 1 (default: 1, 200 operations per page)
 
         Returns:
@@ -94,8 +100,9 @@ def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callab
             if tag:
                 tag_lower = tag.lower()
                 filtered_tools = [
-                    t for t in all_tools
-                    if hasattr(t, "tags") and any(tag_lower in str(tag).lower() for tag in t.tags)
+                    t
+                    for t in all_tools
+                    if hasattr(t, 'tags') and any(tag_lower in str(tag).lower() for tag in t.tags)
                 ]
             else:
                 filtered_tools = all_tools
@@ -112,25 +119,27 @@ def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callab
             # Return plain text list of names
             operation_names = [tool.name for tool in paginated_tools]
 
-            result = f"Total: {total_count} operations | Page: {page}/{total_pages}\n\n"
-            result += "\n".join(operation_names)
+            result = f'Total: {total_count} operations | Page: {page}/{total_pages}\n\n'
+            result += '\n'.join(operation_names)
 
             return result
         except Exception as e:
-            logger.error(f"Error listing {service_name} operations: {e}")
-            return f"Error: {str(e)}"
+            logger.error('Error listing %s operations: %s', service_name, e)
+            return f'Error: {e!s}'
 
-    @function_tool(name_override=f"search_{service_name}_operations")
+    @function_tool(name_override=f'search_{service_name}_operations')
     async def search_operations(query: str, limit: int = 20) -> str:
         """Search for API operations matching the query.
 
         Args:
             query: Natural language description of what you want to do
                    (e.g., "list pods", "get dashboard", "cluster status")
-            limit: Maximum number of operations to return (default: 20, max: 50)
+            limit: Maximum number of operations to return
+                   (default: 20, max: 50)
 
         Returns:
-            JSON list of available operations with their names and descriptions (truncated to 100 chars).
+            JSON list of available operations with their names and
+            descriptions (truncated to 100 chars).
         """
         try:
             # Use cached tools to avoid repeated fetches
@@ -143,12 +152,12 @@ def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callab
 
             for tool in all_tools:
                 name_lower = tool.name.lower()
-                desc_lower = tool.description.lower() if tool.description else ""
+                desc_lower = tool.description.lower() if tool.description else ''
 
                 score = 0
 
                 # Exact name match
-                if query_lower == name_lower.replace(f"{service_name}.", ""):
+                if query_lower == name_lower.replace(f'{service_name}.', ''):
                     score += 100
 
                 # Partial name match
@@ -176,22 +185,22 @@ def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callab
             result = []
             for tool in top_tools:
                 # Truncate description to 100 chars
-                desc = tool.description if tool.description else ""
+                desc = tool.description if tool.description else ''
                 if len(desc) > 100:
-                    desc = desc[:100] + "..."
+                    desc = desc[:100] + '...'
 
                 result.append({
-                    "name": tool.name,
-                    "tags": tool.tags if hasattr(tool, "tags") else [],
-                    "description": desc,
+                    'name': tool.name,
+                    'tags': tool.tags if hasattr(tool, 'tags') else [],
+                    'description': desc,
                 })
 
             return json.dumps(result, indent=2)
         except Exception as e:
-            logger.error(f"Error searching {service_name} operations: {e}")
-            return json.dumps({"error": str(e)})
+            logger.error('Error searching %s operations: %s', service_name, e)
+            return json.dumps({'error': str(e)})
 
-    @function_tool(name_override=f"get_{service_name}_operation_details")
+    @function_tool(name_override=f'get_{service_name}_operation_details')
     async def get_operation_details(tool_name: str) -> str:
         """Get detailed parameter schema for a specific operation.
 
@@ -210,30 +219,32 @@ def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callab
             for tool in all_tools:
                 if tool.name == tool_name:
                     # Serialize the schema
-                    schema = _serialize_schema(tool.inputs) if hasattr(tool, "inputs") else {}
+                    schema = _serialize_schema(tool.inputs) if hasattr(tool, 'inputs') else {}
 
                     response = {
-                        "name": tool.name,
-                        "description": tool.description,
-                        "parameters": schema,
+                        'name': tool.name,
+                        'description': tool.description,
+                        'parameters': schema,
                     }
 
                     return json.dumps(response, indent=2)
 
-            return json.dumps({"error": f"Tool '{tool_name}' not found."})
+            return json.dumps({'error': f"Tool '{tool_name}' not found."})
         except Exception as e:
-            logger.error(f"Error getting {service_name} operation details: {e}")
-            return json.dumps({"error": str(e)})
+            logger.error('Error getting %s operation details: %s', service_name, e)
+            return json.dumps({'error': str(e)})
 
-    @function_tool(name_override=f"call_{service_name}_operation")
-    async def call_operation(tool_name: str, arguments: str = "{}") -> str:
-        f"""Execute a {service_name} API operation.
+    @function_tool(name_override=f'call_{service_name}_operation')
+    async def call_operation(tool_name: str, arguments: str = '{}') -> str:
+        """Execute an API operation.
 
-        IMPORTANT: This tool is ONLY for {service_name} operations. Tool names must start with '{service_name}.'
-        If you need to call operations from other services, use their respective call_*_operation tools.
+        IMPORTANT: This tool is ONLY for operations of this service.
+        Tool names must start with the service prefix.
+        If you need to call operations from other services,
+        use their respective call_*_operation tools.
 
         Args:
-            tool_name: The exact tool name from search results (must start with '{service_name}.')
+            tool_name: The exact tool name from search results
             arguments: JSON string of arguments matching the tool's parameter schema
 
         Returns:
@@ -241,36 +252,46 @@ def create_utcp_tools(utcp_client: UtcpClient, service_name: str) -> List[Callab
         """
         try:
             # Validate tool name belongs to this service
-            # Tool names should be prefixed with service name (e.g., "kubernetes.listPods")
-            expected_prefix = f"{service_name}."
+            # Tool names should be prefixed with service name
+            expected_prefix = f'{service_name}.'
             if not tool_name.startswith(expected_prefix):
+                tool_service = tool_name.split('.')[0]
                 error_msg = (
-                    f"Tool name mismatch: '{tool_name}' does not start with '{expected_prefix}'. "
-                    f"You called 'call_{service_name}_operation' but provided a tool from a different service. "
-                    f"Please use the correct tool function: call_{tool_name.split('.')[0]}_operation"
+                    f"Tool name mismatch: '{tool_name}' does not "
+                    f"start with '{expected_prefix}'. "
+                    f"You called 'call_{service_name}_operation' "
+                    f'but provided a tool from a different service. '
+                    f'Please use the correct tool function: '
+                    f'call_{tool_service}_operation'
                 )
-                logger.error(f"[{service_name}] {error_msg}")
-                return json.dumps({"error": error_msg})
+                logger.error('[%s] %s', service_name, error_msg)
+                return json.dumps({'error': error_msg})
 
-            logger.debug(f"[{service_name}] Calling tool: {tool_name}")
+            logger.debug('[%s] Calling tool: %s', service_name, tool_name)
             args = json.loads(arguments) if arguments else {}
             result = await utcp_client.call_tool(tool_name, args)
             return _serialize_result(result)
         except json.JSONDecodeError as e:
-            return json.dumps({"error": f"Invalid JSON arguments: {e}"})
+            return json.dumps({'error': f'Invalid JSON arguments: {e}'})
         except Exception as e:
             import traceback
+
             error_msg = str(e) or type(e).__name__
-            logger.error(f"[{service_name}] Error calling operation {tool_name}: {error_msg}")
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return json.dumps({"error": error_msg})
+            logger.error(
+                '[%s] Error calling operation %s: %s',
+                service_name,
+                tool_name,
+                error_msg,
+            )
+            logger.error('Traceback: %s', traceback.format_exc())
+            return json.dumps({'error': error_msg})
 
     return [list_operations, search_operations, get_operation_details, call_operation]
 
 
 def _serialize_schema(obj) -> dict:
     """Recursively serialize JsonSchema objects to dicts."""
-    if hasattr(obj, "model_dump"):
+    if hasattr(obj, 'model_dump'):
         data = obj.model_dump()
         return _serialize_schema(data)
     elif isinstance(obj, dict):
@@ -300,7 +321,7 @@ def _extract_token_from_kubeconfig(kubeconfig_data: dict, service_name: str) -> 
         # Get current context
         current_context = kubeconfig_data.get('current-context')
         if not current_context:
-            raise ValueError("No current-context found in kubeconfig")
+            raise ValueError('No current-context found in kubeconfig')
 
         # Find context and user mappings
         contexts = {c['name']: c['context'] for c in kubeconfig_data.get('contexts', [])}
@@ -327,14 +348,16 @@ def _extract_token_from_kubeconfig(kubeconfig_data: dict, service_name: str) -> 
             token_file = user.get('tokenFile', '')
             if token_file:
                 logger.warning(
-                    f"[{service_name}] kubeconfig uses tokenFile reference: {token_file}. "
-                    "For better security, embed the token directly in kubeconfig."
+                    '[%s] kubeconfig uses tokenFile reference: %s. '
+                    'For better security, embed the token directly in kubeconfig.',
+                    service_name,
+                    token_file,
                 )
                 try:
-                    with open(token_file, 'r') as f:
+                    with open(token_file) as f:
                         token = f.read().strip()
                 except Exception as e:
-                    raise ValueError(f"Failed to read token from {token_file}: {e}")
+                    raise ValueError(f'Failed to read token from {token_file}: {e}') from e
 
         if not token:
             raise ValueError(
@@ -342,12 +365,16 @@ def _extract_token_from_kubeconfig(kubeconfig_data: dict, service_name: str) -> 
                 "Ensure kubeconfig contains 'token' field in user configuration."
             )
 
-        logger.debug(f"[{service_name}] Token extracted successfully (length: {len(token)} chars)")
+        logger.debug(
+            '[%s] Token extracted successfully (length: %d chars)',
+            service_name,
+            len(token),
+        )
         return token
 
     except Exception as e:
-        logger.error(f"[{service_name}] Kubeconfig parsing error: {e}")
-        raise ValueError(f"Kubeconfig parsing failed: {e}")
+        logger.error('[%s] Kubeconfig parsing error: %s', service_name, e)
+        raise ValueError(f'Kubeconfig parsing failed: {e}') from e
 
 
 class ToolLoader:
@@ -360,16 +387,16 @@ class ToolLoader:
     """
 
     # Map spec_source config values to strategy classes
-    _SPEC_STRATEGIES: dict[str, type[SpecSourceStrategy]] = {
-        "local": LocalFileStrategy,
-        "live": LiveURLStrategy,
+    _SPEC_STRATEGIES: ClassVar[dict[str, type[SpecSourceStrategy]]] = {
+        'local': LocalFileStrategy,
+        'live': LiveURLStrategy,
     }
 
     def __init__(
         self,
-        specs_dir: Optional[Path] = None,
-        openapi_handlers: Optional[dict[str, OpenApiHandler]] = None,
-        ssl_manager: Optional[SSLConfigManager] = None,
+        specs_dir: Path | None = None,
+        openapi_handlers: dict[str, OpenApiHandler] | None = None,
+        ssl_manager: SSLConfigManager | None = None,
     ):
         """Initialize the tool loader.
 
@@ -390,11 +417,11 @@ class ToolLoader:
         self,
         service_name: str,
         openapi_url: str,
-        auth_type: str = "proxy",
-        token: str = "",
+        auth_type: str = 'proxy',
+        token: str = '',
         insecure: bool = False,
-        version: str = "",
-        spec_source: str = "local",
+        version: str = '',
+        spec_source: str = 'local',
     ) -> UtcpClient:
         """Create a UTCP client for a service.
 
@@ -402,7 +429,7 @@ class ToolLoader:
             service_name: Service name (e.g., 'kubernetes', 'grafana')
             openapi_url: URL to the OpenAPI spec endpoint
             auth_type: Authentication type ('proxy', 'bearer', 'api_key', 'jwt')
-            token: Bearer token for direct API access (required when auth_type='bearer')
+            token: Bearer token for direct API access
             insecure: Skip TLS verification for self-signed certificates
             version: Version of the spec to use (for local spec file lookup)
             spec_source: Where to load the spec from - 'local' or 'live'
@@ -422,36 +449,34 @@ class ToolLoader:
         # 3. Resolve spec source using per-service strategy
         strategy_cls = self._SPEC_STRATEGIES.get(spec_source, LocalFileStrategy)
         strategy = strategy_cls()
-        resolved_source = strategy.resolve(
-            service_name, openapi_url, version, self.specs_dir
-        )
+        resolved_source = strategy.resolve(service_name, openapi_url, version, self.specs_dir)
         set_api_base_url(service_name, resolved_source.api_base_url)
 
         # 4. Get OpenAPI handler
-        handler = self.openapi_handlers.get(
-            service_name, DefaultOpenApiHandler(service_name)
-        )
+        handler = self.openapi_handlers.get(service_name, DefaultOpenApiHandler(service_name))
 
         # 5. Build call template
         call_template: dict = {
-            "name": service_name,
-            "call_template_type": "http",
-            "url": resolved_source.url,
+            'name': service_name,
+            'call_template_type': 'http',
+            'url': resolved_source.url,
         }
 
         # 6. Configure auth using handler
         load_variables_from = []
         bearer_token = None
 
-        if auth_type == "kubeconfig":
-            # KUBECONFIG AUTH: Extract token from base64-encoded kubeconfig (IN MEMORY)
-            kubeconfig_env_key = f"UTCP_{service_name.upper().replace('-', '_')}_KUBECONFIG_CONTENT"
+        if auth_type == 'kubeconfig':
+            # KUBECONFIG AUTH: Extract token from base64-encoded kubeconfig
+            kubeconfig_env_key = (
+                f'UTCP_{service_name.upper().replace("-", "_")}_KUBECONFIG_CONTENT'
+            )
             kubeconfig_b64 = os.getenv(kubeconfig_env_key)
 
             if not kubeconfig_b64:
                 raise ValueError(
-                    f"[{service_name}] {kubeconfig_env_key} environment variable not found. "
-                    "Ensure Juju secret with kubeconfig-content is granted."
+                    f'[{service_name}] {kubeconfig_env_key} environment variable not found. '
+                    'Ensure Juju secret with kubeconfig-content is granted.'
                 )
 
             # Decode and parse kubeconfig (IN MEMORY - NO DISK WRITE)
@@ -459,70 +484,83 @@ class ToolLoader:
                 kubeconfig_yaml_str = base64.b64decode(kubeconfig_b64).decode('utf-8')
                 kubeconfig_data = yaml.safe_load(kubeconfig_yaml_str)
                 bearer_token = _extract_token_from_kubeconfig(kubeconfig_data, service_name)
-                logger.info(f"[{service_name}] Token extracted from kubeconfig (in-memory, no disk write)")
+                logger.info(
+                    '[%s] Token extracted from kubeconfig (in-memory, no disk write)',
+                    service_name,
+                )
             except Exception as e:
-                raise ValueError(f"[{service_name}] Failed to process kubeconfig: {e}")
+                raise ValueError(f'[{service_name}] Failed to process kubeconfig: {e}') from e
 
-        elif auth_type == "bearer":
+        elif auth_type == 'bearer':
             # BEARER AUTH: Read token directly from environment or parameter
-            token_env_key = f"UTCP_{service_name.upper().replace('-', '_')}_TOKEN"
+            token_env_key = f'UTCP_{service_name.upper().replace("-", "_")}_TOKEN'
             bearer_token = os.getenv(token_env_key) or token
 
             if not bearer_token:
                 raise ValueError(
-                    f"[{service_name}] {token_env_key} environment variable not found. "
-                    "Ensure Juju secret with token is granted."
+                    f'[{service_name}] {token_env_key} environment variable not found. '
+                    'Ensure Juju secret with token is granted.'
                 )
 
-            logger.info(f"[{service_name}] Using bearer token from environment")
+            logger.info('[%s] Using bearer token from environment', service_name)
 
-        elif auth_type == "none":
-            # NO AUTH: Service requires no authentication (e.g., Prometheus behind proxy)
-            logger.info(f"[{service_name}] No authentication configured (auth_type=none)")
+        elif auth_type == 'none':
+            # NO AUTH: Service requires no authentication
+            logger.info(
+                '[%s] No authentication configured (auth_type=none)',
+                service_name,
+            )
 
-        # Configure bearer auth (unified for both kubeconfig-extracted and direct tokens)
+        # Configure bearer auth (unified for kubeconfig-extracted and direct tokens)
         if bearer_token:
-            call_template["auth"] = {
-                "auth_type": "api_key",
-                "api_key": f"Bearer {bearer_token}",
-                "var_name": "Authorization",
-                "location": "header",
+            call_template['auth'] = {
+                'auth_type': 'api_key',
+                'api_key': f'Bearer {bearer_token}',
+                'var_name': 'Authorization',
+                'location': 'header',
             }
 
             variable_loader = handler.get_variable_loader(bearer_token)
             if variable_loader:
                 load_variables_from.append(variable_loader)
 
-            logger.info(f"[{service_name}] Configured bearer token authentication")
+            logger.info(
+                '[%s] Configured bearer token authentication',
+                service_name,
+            )
 
         # 7. Create config and client
         config_dict: dict = {
-            "manual_call_templates": [call_template],
-            "tool_search_strategy": {
-                "tool_search_strategy_type": "tag_and_description_word_match"
+            'manual_call_templates': [call_template],
+            'tool_search_strategy': {
+                'tool_search_strategy_type': 'tag_and_description_word_match'
             },
         }
         if load_variables_from:
-            config_dict["load_variables_from"] = load_variables_from
+            config_dict['load_variables_from'] = load_variables_from
 
-        logger.info(f"[{service_name}] Creating UTCP client (spec_source={spec_source})")
-        logger.info(f"[{service_name}] Final configuration:")
-        logger.info(f"  - Spec URL: {resolved_source.url}")
-        logger.info(f"  - API base URL: {resolved_source.api_base_url}")
-        logger.info(f"  - Auth type: {auth_type}")
-        logger.info(f"  - Insecure mode: {insecure}")
+        logger.info(
+            '[%s] Creating UTCP client (spec_source=%s)',
+            service_name,
+            spec_source,
+        )
+        logger.info('[%s] Final configuration:', service_name)
+        logger.info('  - Spec URL: %s', resolved_source.url)
+        logger.info('  - API base URL: %s', resolved_source.api_base_url)
+        logger.info('  - Auth type: %s', auth_type)
+        logger.info('  - Insecure mode: %s', insecure)
 
         config = UtcpClientConfig(**config_dict)
         client = await UtcpClient.create(config=config)
         self._clients[service_name] = client
-        logger.info(f"[{service_name}] UTCP client created successfully")
+        logger.info('[%s] UTCP client created successfully', service_name)
         return client
 
     def load_service_tools(
         self,
         utcp_client: UtcpClient,
         service_name: str,
-    ) -> List[Callable]:
+    ) -> list[Callable]:
         """Load tools for a service.
 
         Args:
@@ -534,7 +572,7 @@ class ToolLoader:
         """
         return create_utcp_tools(utcp_client, service_name)
 
-    def list_available_versions(self, service_name: str) -> List[str]:
+    def list_available_versions(self, service_name: str) -> list[str]:
         """List available spec versions for a service.
 
         Args:
@@ -548,9 +586,10 @@ class ToolLoader:
         if not service_dir.exists():
             return []
 
-        versions = []
-        for spec_file in service_dir.iterdir():
-            if spec_file.suffix in [".json", ".yaml", ".yml"]:
-                versions.append(spec_file.stem)
+        versions = [
+            spec_file.stem
+            for spec_file in service_dir.iterdir()
+            if spec_file.suffix in ['.json', '.yaml', '.yml']
+        ]
 
         return sorted(versions)
