@@ -1,0 +1,25 @@
+set ignore-comments
+
+# this is the first recipe in the file, so it will run if just is called without a recipe
+[doc('Describe usage and list the available recipes.')]
+help:
+    @just --list --unsorted
+
+##########
+# Linting
+##########
+
+[doc('Run `ruff`, failing afterwards if any errors are found.')]
+fast-lint path='.':
+    #!/usr/bin/env -S bash -xueo pipefail
+    FAILURES=0
+    uv run --only-group=fast-lint ruff check --preview '{{path}}' || ((FAILURES+=1))
+    uv run --only-group=fast-lint ruff check --preview --diff '{{path}}' || : 'Printed diff of changes to fix `ruff check` issues.'
+    uv run --only-group=fast-lint ruff format --preview --diff '{{path}}' || ((FAILURES+=1))
+    : "$FAILURES command(s) failed."
+    exit $FAILURES
+
+[doc('Run `ruff check --fix` and `ruff format`, modifying files in place.')]
+format package='.':
+    uv run --only-group=fast-lint ruff format --preview '{{package}}'
+    uv run --only-group=fast-lint ruff check --preview --fix '{{package}}'

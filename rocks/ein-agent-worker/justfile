@@ -1,0 +1,126 @@
+set ignore-comments
+
+rock_name := 'ein-agent-worker'
+version := '0.1.0'
+registry := env('REGISTRY', 'ghcr.io/jneo8')
+
+specs_dir := 'specs'
+
+# Default versions (can be overridden: just download-k8s-spec k8s_version=1.34)
+k8s_version := '1.35'
+ceph_version := 'tentacle'
+grafana_version := '12'
+# Prometheus OpenAPI spec is generated at build time (PR #17825), pinned to merge commit on main
+prometheus_commit := '75f94903b36d11b7b47dc3e0ebabab1ce3acabc7'
+prometheus_version := '3.5.0'
+
+# Source URL templates
+k8s_openapi_url := 'https://raw.githubusercontent.com/kubernetes/kubernetes/release-' + k8s_version + '/api/openapi-spec/swagger.json'
+ceph_openapi_url := 'https://raw.githubusercontent.com/ceph/ceph/' + ceph_version + '/src/pybind/mgr/dashboard/openapi.yaml'
+grafana_openapi_url := 'https://raw.githubusercontent.com/grafana/grafana/v' + grafana_version + '.0.0/public/api-merged.json'
+prometheus_openapi_url := 'https://raw.githubusercontent.com/prometheus/prometheus/' + prometheus_commit + '/web/api/v1/testdata/openapi_3.1_golden.yaml'
+
+# this is the first recipe in the file, so it will run if just is called without a recipe
+[doc('Describe usage and list the available recipes.')]
+help:
+    @just --list --unsorted
+
+##########
+# Linting
+##########
+
+[doc('Run `ruff`, failing afterwards if any errors are found.')]
+fast-lint path='.':
+    #!/usr/bin/env -S bash -xueo pipefail
+    FAILURES=0
+    uv run --only-group=fast-lint ruff check --preview '{{path}}' || ((FAILURES+=1))
+    uv run --only-group=fast-lint ruff check --preview --diff '{{path}}' || : 'Printed diff of changes to fix `ruff check` issues.'
+    uv run --only-group=fast-lint ruff format --preview --diff '{{path}}' || ((FAILURES+=1))
+    : "$FAILURES command(s) failed."
+    exit $FAILURES
+
+[doc('Run `ruff check --fix` and `ruff format`, modifying files in place.')]
+format package='.':
+    uv run --only-group=fast-lint ruff format --preview '{{package}}'
+    uv run --only-group=fast-lint ruff check --preview --fix '{{package}}'
+
+##############
+# ROCK Build
+##############
+
+[doc('Clean rockcraft build artifacts.')]
+rock-clean:
+    rockcraft clean
+
+[doc('Build ROCK image.')]
+rock-build:
+    rockcraft pack
+
+[doc('Load ROCK into Docker.')]
+rock-load:
+    skopeo --insecure-policy copy oci-archive:{{rock_name}}_{{version}}_amd64.rock docker-daemon:{{rock_name}}:{{version}}
+
+[doc('Tag ROCK image for registry.')]
+rock-tag:
+    docker tag {{rock_name}}:{{version}} {{registry}}/{{rock_name}}:{{version}}
+    docker tag {{rock_name}}:{{version}} {{registry}}/{{rock_name}}:latest
+
+[doc('Build, load, and tag rock image.')]
+rock-all: rock-build rock-load rock-tag
+
+##############
+# Deployment
+##############
+
+[doc('Deploy worker with Juju (requires TEMPORAL_HOST env var).')]
+deploy:
+    juju deploy temporal-worker-k8s catcher-agent-worker --channel stable \
+        --resource temporal-worker-image={{registry}}/{{rock_name}}:{{version}} \
+        --config host=${TEMPORAL_HOST} \
+        --config namespace=default \
+        --config queue=catcher-agent-queue \
+        --config log-level=info
+
+[doc('Run kubectl port-forward to access temporal UI.')]
+port-forward-temporal-ui:
+    kubectl port-forward -n temporal pod/temporal-ui-k8s-0 8080:8080
+
+[doc('Run kubectl port-forward to access temporal server.')]
+port-forward-temporal-server:
+    kubectl port-forward -n temporal svc/temporal-k8s 7233:7233
+
+[doc('Create default namespace on temporal.')]
+create-default-namespace:
+    juju run temporal-admin-k8s/0 cli args="operator namespace create --namespace default --retention 3d" --wait 1m
+
+################
+# OpenAPI Specs
+################
+
+[doc('Download all OpenAPI specs.')]
+download-openapi-specs: download-k8s-spec download-ceph-spec download-grafana-spec download-prometheus-spec
+    @echo "All OpenAPI specs downloaded to {{specs_dir}}/"
+
+[doc('Download Kubernetes OpenAPI spec.')]
+download-k8s-spec:
+    @mkdir -p {{specs_dir}}/kubernetes
+    @echo "Downloading Kubernetes {{k8s_version}} OpenAPI spec..."
+    curl -L -o {{specs_dir}}/kubernetes/{{k8s_version}}.json {{k8s_openapi_url}}
+
+[doc('Download Ceph OpenAPI spec.')]
+download-ceph-spec:
+    @mkdir -p {{specs_dir}}/ceph
+    @echo "Downloading Ceph {{ceph_version}} OpenAPI spec..."
+    curl -L -o {{specs_dir}}/ceph/{{ceph_version}}.yaml {{ceph_openapi_url}}
+
+[doc('Download Grafana OpenAPI spec.')]
+download-grafana-spec:
+    @mkdir -p {{specs_dir}}/grafana
+    @echo "Downloading Grafana v{{grafana_version}} OpenAPI spec..."
+    curl -L -o {{specs_dir}}/grafana/{{grafana_version}}.json {{grafana_openapi_url}}
+
+[doc('Download Prometheus OpenAPI spec.')]
+download-prometheus-spec:
+    @mkdir -p {{specs_dir}}/prometheus
+    @echo "Downloading Prometheus {{prometheus_version}} OpenAPI spec..."
+    curl -L -o {{specs_dir}}/prometheus/{{prometheus_version}}.yaml {{prometheus_openapi_url}}

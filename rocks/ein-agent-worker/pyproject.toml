@@ -22,6 +22,121 @@ build-backend = "setuptools.build_meta"
 dev = [
     "temporal-lib-py>=1.8.4",
 ]
+fast-lint = [
+    "ruff==0.11.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["ein_agent_worker*"]
+
+# Linting tools configuration
+[tool.ruff]
+line-length = 99
+target-version = "py312"
+exclude = [
+    ".bzr",
+    ".direnv",
+    ".eggs",
+    ".git",
+    ".git-rewrite",
+    ".hg",
+    ".mypy_cache",
+    ".nox",
+    ".pants.d",
+    ".pytype",
+    ".ruff_cache",
+    ".svn",
+    ".tox",
+    ".venv",
+    "__pypackages__",
+    "_build",
+    "buck-out",
+    "dist",
+    "node_modules",
+    "venv",
+    "__pycache__",
+    "*.egg_info",
+]
+
+# Ruff formatter configuration
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.ruff.lint]
+select = [
+    # flake8-builtins
+    "A",
+    # flake8-bugbear
+    "B",
+    # pyflakes-docstrings
+    "D",
+    # conventional names
+    "C",
+    # Pycodestyle (error)
+    "E",
+    # Pyflakes
+    "F",
+    # flake8-logging-format
+    "G",
+    # isort
+    "I001",
+    # pep8-naming
+    "N",
+    # Perflint
+    "PERF",
+    # Ruff specific
+    "RUF",
+    # flake8-bandit
+    "S",
+    # flake8-simplify
+    "SIM",
+    # flake8-type-checking
+    "TC",
+    # pyupgrade
+    "UP",
+    # Pycodestyle (warning)
+    "W",
+    # flake8-2020
+    "YTT",
+]
+ignore = [
+    # mccabe
+    "C90",
+    # Missing docstring in magic method
+    "D105",
+    # Missing docstring in `__init__`
+    "D107",
+    # Use of `assert` detected
+    "S101",
+    # `subprocess` module is possibly insecure
+    "S404",
+    # subprocess-without-shell-equals-true
+    "S603",
+    # start-process-with-partial-path
+    "S607",
+    # Return condition directly, prefer readability.
+    "SIM103",
+    # Use contextlib.suppress() instead of try/except: pass
+    "SIM105",
+    # Use a single `with` statement with multiple contexts instead of nested `with` statements
+    "SIM117",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"./**/tests/*" = [
+    # All documentation linting.
+    "D",
+    # Hard-coded password string.
+    "S105",
+    # Hard-coded password function argument.
+    "S106",
+    # "Useless" expression.
+    "B018",
+    # Redefinition of unused (we import fixtures)
+    "F811",
+    # Setting a permissive mask on a file or directory
+    "S103",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
