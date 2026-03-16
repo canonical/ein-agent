@@ -1,0 +1,35 @@
+name: Version consistency check
+
+permissions: {}
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Check version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install yq
+        run: sudo snap install yq
+
+      - name: Verify versions match
+        run: |
+          SNAP_VERSION=$(yq '.version' ein-agent-cli/snap/snapcraft.yaml)
+          ROCK_VERSION=$(yq '.version' rocks/ein-agent-worker/rockcraft.yaml)
+          echo "snap version: $SNAP_VERSION"
+          echo "rock version: $ROCK_VERSION"
+          if [ "$SNAP_VERSION" != "$ROCK_VERSION" ]; then
+            echo "::error::Version mismatch: snapcraft.yaml=$SNAP_VERSION rockcraft.yaml=$ROCK_VERSION"
+            exit 1
+          fi
+          echo "Versions match: $SNAP_VERSION"
