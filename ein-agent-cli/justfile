@@ -23,3 +23,15 @@ fast-lint path='.':
 format package='.':
     uv run --only-group=fast-lint ruff format --preview '{{package}}'
     uv run --only-group=fast-lint ruff check --preview --fix '{{package}}'
+
+##############
+# Snap Build
+##############
+
+[doc('Build snap package.')]
+snap-build:
+    snapcraft pack
+
+[doc('Clean snapcraft build artifacts.')]
+snap-clean:
+    snapcraft clean
