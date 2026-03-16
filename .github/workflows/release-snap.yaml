@@ -4,8 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - "ein-agent-cli/**"
   release:
     types: [published]
   workflow_dispatch:
