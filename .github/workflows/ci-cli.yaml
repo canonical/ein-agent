@@ -1,0 +1,23 @@
+name: CI - CLI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+    paths:
+      - "ein-agent-cli/**"
+      - ".github/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  fast-lint:
+    uses: ./.github/workflows/fast-lint.yaml
+    with:
+      component: ein-agent-cli

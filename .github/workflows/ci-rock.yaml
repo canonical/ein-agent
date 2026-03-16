@@ -1,0 +1,128 @@
+name: CI - Rock
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
+    paths:
+      - "rocks/ein-agent-worker/**"
+      - ".github/**"
+  workflow_call:
+    outputs:
+      artifact-prefix:
+        description: Prefix for rock package artifact
+        value: ${{ jobs.build.outputs.artifact-prefix }}
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  fast-lint:
+    uses: ./.github/workflows/fast-lint.yaml
+    with:
+      component: rocks/ein-agent-worker
+
+  build:
+    name: Build rock
+    needs: fast-lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      artifact-prefix: ${{ steps.vars.outputs.artifact-prefix }}
+      rock-file: ${{ steps.vars.outputs.rock-file }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo snap install concierge --classic
+          sudo concierge prepare -p crafts
+
+      - name: Clean runner to free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force
+          sudo docker builder prune -a
+
+      - name: Pack rock
+        working-directory: rocks/ein-agent-worker
+        run: rockcraft pack
+
+      - name: Set output variables
+        id: vars
+        working-directory: rocks/ein-agent-worker
+        run: |
+          ROCK_FILE=$(ls *.rock)
+          echo "rock-file=$ROCK_FILE" >> "$GITHUB_OUTPUT"
+          echo "artifact-prefix=packed-rock-ein-agent-worker" >> "$GITHUB_OUTPUT"
+
+      - name: Upload rock artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: packed-rock-ein-agent-worker
+          path: rocks/ein-agent-worker/*.rock
+          if-no-files-found: error
+
+  smoke-test:
+    name: Smoke test
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install rockcraft
+        run: sudo snap install rockcraft --classic
+
+      - name: Install yq
+        run: sudo snap install yq
+
+      - name: Download rock artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.artifact-prefix }}
+          path: rocks/ein-agent-worker
+
+      - name: Import rock to Docker
+        working-directory: rocks/ein-agent-worker
+        run: |
+          ROCK_FILE=$(ls *.rock)
+          VERSION=$(yq .version rockcraft.yaml)
+          sudo rockcraft.skopeo --insecure-policy copy \
+            "oci-archive:${ROCK_FILE}" \
+            "docker-daemon:ein-agent-worker:test"
+          echo "Imported ${ROCK_FILE} as ein-agent-worker:test"
+
+      - name: Verify rock image
+        run: |
+          # Verify the image exists
+          docker images ein-agent-worker:test
+
+          # Verify the worker module is present in the image
+          docker run --rm --entrypoint /bin/bash ein-agent-worker:test \
+            -c "test -f /app/ein_agent_worker/worker.py"
+          echo "✓ worker.py found"
+
+          # Verify the start script exists and is executable
+          docker run --rm --entrypoint /bin/bash ein-agent-worker:test \
+            -c "test -x /app/scripts/start-worker.sh"
+          echo "✓ start-worker.sh is executable"
+
+          # Verify specs directory is present with expected specs
+          docker run --rm --entrypoint /bin/bash ein-agent-worker:test \
+            -c "ls /app/specs/"
+          echo "✓ specs directory present"
+
+          # Verify Python and dependencies are installed
+          docker run --rm --entrypoint /bin/bash ein-agent-worker:test \
+            -c "python3 --version"
+          echo "✓ Python available"
+
+          echo "All smoke tests passed"

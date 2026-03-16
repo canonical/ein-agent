@@ -1,0 +1,35 @@
+name: Fast lint
+
+permissions: {}
+
+on:
+  workflow_call:
+    inputs:
+      component:
+        description: "Component directory to lint"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      component:
+        description: "Component directory to lint"
+        required: true
+        type: choice
+        options:
+          - ein-agent-cli
+          - rocks/ein-agent-worker
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Run linting
+        working-directory: ${{ inputs.component }}
+        run: uvx --from rust-just just fast-lint
