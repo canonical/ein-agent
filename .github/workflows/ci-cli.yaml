@@ -8,6 +8,7 @@ on:
     paths:
       - "ein-agent-cli/**"
       - ".github/**"
+  workflow_call:
   workflow_dispatch:
 
 concurrency:
@@ -21,3 +22,44 @@ jobs:
     uses: ./.github/workflows/fast-lint.yaml
     with:
       component: ein-agent-cli
+
+  build:
+    name: Build snap
+    needs: fast-lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      snap: ${{ steps.build.outputs.snap }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build snap
+        id: build
+        uses: canonical/action-build@v1
+        with:
+          path: ein-agent-cli
+
+      - name: Upload snap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: snap-ein-agent
+          path: ${{ steps.build.outputs.snap }}
+          if-no-files-found: error
+
+  smoke-test:
+    name: Smoke test
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Download snap artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: snap-ein-agent
+
+      - name: Install snap
+        run: sudo snap install *.snap --dangerous
+
+      - name: Verify snap works
+        run: ein-agent --help

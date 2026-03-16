@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "ein-agent-cli"
 version = "0.1.0"
@@ -11,6 +15,12 @@ dependencies = [
     "temporalio>=1.20.0",
     "typer>=0.20.0",
 ]
+
+[project.scripts]
+ein-agent = "ein_agent_cli.command:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ein_agent_cli"]
 
 [dependency-groups]
 fast-lint = [
