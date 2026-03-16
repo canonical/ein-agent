@@ -1,0 +1,45 @@
+name: Publish snap
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "ein-agent-cli/**"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci-cli.yaml
+    secrets: inherit
+
+  release:
+    name: Publish to Snap Store
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Download snap artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: snap-ein-agent
+
+      - name: Find the downloaded snap file
+        run: echo "SNAP_FILE=$(find . -name '*.snap')" >> $GITHUB_ENV
+
+      - name: Publish to Snap Store
+        if: env.SNAPCRAFT_STORE_CREDENTIALS != ''
+        uses: snapcore/action-publish@v1
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.STORE_LOGIN }}
+        with:
+          snap: ${{ env.SNAP_FILE }}
+          release: latest/edge
