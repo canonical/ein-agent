@@ -1,0 +1,77 @@
+name: Publish rock
+
+on:
+  push:
+    branches:
+      - main
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ci:
+    uses: ./.github/workflows/ci-rock.yaml
+    secrets: inherit
+
+  release:
+    name: Publish to GHCR
+    needs: ci
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install skopeo
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+
+      - name: Install yq
+        run: sudo snap install yq
+
+      - name: Download rock artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.ci.outputs.artifact-prefix }}
+
+      - name: Determine image metadata
+        id: meta
+        run: |
+          ROCK_FILE=$(ls *.rock)
+          IMAGE_NAME=$(yq '.name' rocks/ein-agent-worker/rockcraft.yaml)
+          VERSION=$(yq '.version' rocks/ein-agent-worker/rockcraft.yaml)
+          echo "rock-file=$ROCK_FILE" >> "$GITHUB_OUTPUT"
+          echo "image-name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Image: ${IMAGE_NAME}, Version: ${VERSION}, Rock: ${ROCK_FILE}"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish rock to GHCR
+        env:
+          REGISTRY: ghcr.io/${{ github.repository_owner }}
+          IMAGE_NAME: ${{ steps.meta.outputs.image-name }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          ROCK_FILE: ${{ steps.meta.outputs.rock-file }}
+        run: |
+          IMAGE="${REGISTRY}/${IMAGE_NAME}"
+
+          echo "Publishing ${IMAGE}:${VERSION}"
+          skopeo --insecure-policy copy \
+            "oci-archive:${ROCK_FILE}" \
+            "docker://${IMAGE}:${VERSION}"
+
+          echo "Tagging ${IMAGE}:latest"
+          skopeo --insecure-policy copy \
+            "oci-archive:${ROCK_FILE}" \
+            "docker://${IMAGE}:latest"
