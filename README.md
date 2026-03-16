@@ -27,15 +27,13 @@ Ein Agent is a distributed AI-powered workflow orchestration system designed to 
                |                     |  |      [Ein Agent] < - - - - - - - - - - - - - - ->  /-----\
                |                     |  |           |           |                           <  LLM  >
                | (7) Check           |  +-----------+-----------+                            \-----/
-               |                     |              |       \                                   |
-               |                     |              |        \ (5) Search                       |
-               v                     |              | (4)     - - - -> [ RAGs ]                 |
-       +---------------+             |              | List/                                     |
-       | Output Target | < - (6) - - +              | Call                                      |
-       +---------------+  Send Output|              v                                           |
-                                     |      [ UTCP Tools ]                                      |
-                                     |              |                                           |
-                                     +--------------|-------------------------------------------+
+               |                     |              |                                             |
+               |                     |              | (5) List/                                   |
+               v                     |              |     Call                                    |
+       +---------------+             |              v                                             |
+       | Output Target | < - (6) - - +      [ UTCP Tools ]                                       |
+       +---------------+  Send Output|              |                                             |
+                                     +--------------|---------------------------------------------+
                                                     |
                                                     | Read-only calls
                                                     v
@@ -60,10 +58,17 @@ A command-line interface to trigger and manage workflows. It allows users to:
 
 ### ein-agent-worker
 
-A Temporal worker that executes AI-powered workflows. Built with:
+A Temporal worker that executes AI-powered workflows. Pre-built ROCK images are available from GHCR:
+
+```bash
+docker pull ghcr.io/jneo8/ein-agent-worker:latest
+```
+
+Built with:
 - Temporal workflow engine for reliable distributed execution
 - OpenAI Agents for AI-powered analysis
 - LiteLLM for flexible LLM provider support (supports Gemini and other models)
+- UTCP for dynamic tool generation from OpenAPI specs (skills support planned)
 
 ## Getting Started
 

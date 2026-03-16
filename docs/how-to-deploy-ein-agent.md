@@ -90,25 +90,23 @@ Once deployed, note the Temporal server address (typically the service IP or hos
 
 ## Deploy ein-agent temporal worker
 
-### Build and Push ROCK Image
+### Pull ROCK Image from GHCR
+
+The worker ROCK image is published to GHCR automatically on pushes to `main` and GitHub releases:
 
 ```bash
-cd ./rocks/ein-agent-worker
-
-# Generate lock file
-uv lock
-
-# Build ROCK image
-make rock-build
-
-# Load into Docker
-make rock-load
-
-# Tag for registry
-make rock-tag
+docker pull ghcr.io/jneo8/ein-agent-worker:latest
+# or a specific version
+docker pull ghcr.io/jneo8/ein-agent-worker:0.1.0
 ```
 
-And make sure the image is import and available on the k8s registry.
+For local builds (optional, e.g. for development):
+```bash
+cd ./rocks/ein-agent-worker
+just rock-build    # Build ROCK image
+just rock-load     # Load into Docker
+just rock-tag      # Tag for registry
+```
 
 ### Create Temporal Namespace
 
