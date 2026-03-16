@@ -65,6 +65,18 @@ A Temporal worker that executes AI-powered workflows. Built with:
 - OpenAI Agents for AI-powered analysis
 - LiteLLM for flexible LLM provider support (supports Gemini and other models)
 
+## Getting Started
+
+### Install the CLI
+
+The easiest way to install the CLI is via snap:
+
+```bash
+sudo snap install ein-agent --channel=latest/edge
+```
+
+Once installed, run `ein-agent --help` to see available commands.
+
 ## Development
 
 Both components are Python-based projects using:
