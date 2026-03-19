@@ -15,6 +15,7 @@ from typing import ClassVar
 import yaml
 from agents import function_tool
 
+from ein_agent_worker.utcp.aiohttp_config import AiohttpConfigManager
 from ein_agent_worker.utcp.local_file_protocol import (
     register_local_file_protocol,
     set_api_base_url,
@@ -29,7 +30,6 @@ from ein_agent_worker.utcp.spec.strategy import (
     LocalFileStrategy,
     SpecSourceStrategy,
 )
-from ein_agent_worker.utcp.ssl_config import SSLConfigManager
 from utcp.utcp_client import UtcpClient
 
 logger = logging.getLogger(__name__)
@@ -383,7 +383,7 @@ class ToolLoader:
     Orchestrates client creation using injected strategies and handlers:
     - SpecSourceStrategy: determines where to load specs from (local/live)
     - OpenApiHandler: provides service-specific auth and spec preprocessing
-    - SSLConfigManager: manages SSL verification settings
+    - AiohttpConfigManager: manages SSL verification settings
     """
 
     # Map spec_source config values to strategy classes
@@ -396,7 +396,7 @@ class ToolLoader:
         self,
         specs_dir: Path | None = None,
         openapi_handlers: dict[str, OpenApiHandler] | None = None,
-        ssl_manager: SSLConfigManager | None = None,
+        aiohttp_config: AiohttpConfigManager | None = None,
     ):
         """Initialize the tool loader.
 
@@ -405,12 +405,12 @@ class ToolLoader:
                        Defaults to specs/ directory relative to package.
             openapi_handlers: Map of service name to OpenApiHandler.
                               Defaults to DEFAULT_OPENAPI_HANDLERS.
-            ssl_manager: SSL configuration manager.
-                         Defaults to a new SSLConfigManager instance.
+            aiohttp_config: SSL configuration manager.
+                         Defaults to a new AiohttpConfigManager instance.
         """
         self.specs_dir = specs_dir or DEFAULT_SPECS_DIR
         self.openapi_handlers = openapi_handlers or DEFAULT_OPENAPI_HANDLERS
-        self.ssl_manager = ssl_manager or SSLConfigManager()
+        self.aiohttp_config = aiohttp_config or AiohttpConfigManager()
         self._clients: dict[str, UtcpClient] = {}
 
     async def create_client(
@@ -444,7 +444,7 @@ class ToolLoader:
 
         # 2. Configure SSL if needed
         if insecure:
-            self.ssl_manager.disable_ssl_verification()
+            self.aiohttp_config.disable_ssl_verification()
 
         # 3. Resolve spec source using per-service strategy
         strategy_cls = self._SPEC_STRATEGIES.get(spec_source, LocalFileStrategy)
