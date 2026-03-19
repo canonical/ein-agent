@@ -2,6 +2,11 @@
 
 These tools allow agents to read and write findings to a shared context,
 enabling cross-agent correlation and preventing redundant investigations.
+
+IMPORTANT: All tools must be async to preserve the Temporal workflow context.
+Sync @function_tool functions lose the workflow context when the OpenAI Agents
+SDK runs them in a thread pool, causing workflow.logger and workflow.now() to
+fail silently.
 """
 
 from collections.abc import Callable
@@ -27,7 +32,7 @@ def create_shared_context_tools(
     """
 
     @function_tool
-    def update_shared_context(key: str, value: str, confidence: float) -> str:
+    async def update_shared_context(key: str, value: str, confidence: float) -> str:  # noqa: RUF029
         """Record a finding to the shared context (Blackboard).
 
         Use this tool when you discover important information during investigation.
@@ -65,7 +70,7 @@ def create_shared_context_tools(
         return f'Finding recorded: [{agent_name}] {key}: {value} (confidence: {confidence:.2f})'
 
     @function_tool
-    def get_shared_context(filter_key: str | None = None) -> str:
+    async def get_shared_context(filter_key: str | None = None) -> str:  # noqa: RUF029
         """Retrieve findings from the shared context (Blackboard).
 
         Call this at the START of your investigation to check if other agents
@@ -124,7 +129,7 @@ def create_shared_context_tools(
         return '\n'.join(lines)
 
     @function_tool
-    def print_findings_report(
+    async def print_findings_report(  # noqa: RUF029
         title: str = 'Investigation Findings Report', include_recommendations: bool = True
     ) -> str:
         """Generate a formatted report of all investigation findings.
@@ -263,7 +268,7 @@ def create_shared_context_tools(
         return report
 
     @function_tool
-    def group_findings(name: str, finding_indices: list[int], analysis: str) -> str:
+    async def group_findings(name: str, finding_indices: list[int], analysis: str) -> str:  # noqa: RUF029
         """Group related findings into a named incident or root cause.
 
         Use this tool to consolidate multiple findings that point to
