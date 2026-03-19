@@ -12,6 +12,7 @@ from temporalio.worker import Worker
 
 from ein_agent_worker.activities.alertmanager import fetch_alerts_activity
 from ein_agent_worker.activities.worker_config import load_utcp_config, load_worker_model
+from ein_agent_worker.httpx_config import HttpxConfigManager
 from ein_agent_worker.models.gemini_litellm_provider import GeminiCompatibleLitellmProvider
 from ein_agent_worker.models.hitl import DEFAULT_MODEL
 from ein_agent_worker.utcp import registry as utcp_registry
@@ -69,6 +70,9 @@ async def main():
     model = os.getenv('EIN_AGENT_MODEL', DEFAULT_MODEL)
 
     logger.info('Using LLM model: %s', model)
+
+    # Enable CIDR-aware NO_PROXY for httpx (used by alertmanager, OpenAI SDK)
+    HttpxConfigManager.enable_cidr_no_proxy()
 
     # Initialize UTCP clients at startup (before workflows run)
     # This allows network I/O outside the Temporal sandbox

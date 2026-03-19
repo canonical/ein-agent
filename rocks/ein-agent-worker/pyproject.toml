@@ -25,6 +25,10 @@ dev = [
 fast-lint = [
     "ruff==0.11.0",
 ]
+test = [
+    "pytest>=9.0.2",
+    "pytest-asyncio>=1.3.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["ein_agent_worker*"]

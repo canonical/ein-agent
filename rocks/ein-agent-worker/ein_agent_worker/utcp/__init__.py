@@ -14,6 +14,7 @@ Architecture:
 """
 
 from ein_agent_worker.utcp import registry
+from ein_agent_worker.utcp.aiohttp_config import AiohttpConfigManager
 from ein_agent_worker.utcp.config import (
     DEFAULT_VERSIONS,
     SUPPORTED_VERSIONS,
@@ -45,7 +46,6 @@ from ein_agent_worker.utcp.spec import (
     SpecSource,
     SpecSourceStrategy,
 )
-from ein_agent_worker.utcp.ssl_config import SSLConfigManager
 from ein_agent_worker.utcp.temporal_utcp import (
     create_utcp_workflow_tools,
     get_utcp_activities,
@@ -55,6 +55,7 @@ __all__ = [
     'DEFAULT_OPENAPI_HANDLERS',
     'DEFAULT_VERSIONS',
     'SUPPORTED_VERSIONS',
+    'AiohttpConfigManager',
     'BearerTokenLoader',
     'CephVersion',
     'DefaultOpenApiHandler',
@@ -67,7 +68,6 @@ __all__ = [
     'LocalFileStrategy',
     'LokiVersion',
     'OpenApiHandler',
-    'SSLConfigManager',
     'SpecSource',
     'SpecSourceStrategy',
     'ToolLoader',
