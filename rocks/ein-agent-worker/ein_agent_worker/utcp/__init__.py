@@ -13,8 +13,8 @@ Architecture:
 - This keeps agent context small while enabling dynamic API discovery
 """
 
+from ein_agent_worker.http import AiohttpConfigManager
 from ein_agent_worker.utcp import registry
-from ein_agent_worker.utcp.aiohttp_config import AiohttpConfigManager
 from ein_agent_worker.utcp.config import (
     DEFAULT_VERSIONS,
     SUPPORTED_VERSIONS,

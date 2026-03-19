@@ -12,7 +12,7 @@ from temporalio.worker import Worker
 
 from ein_agent_worker.activities.alertmanager import fetch_alerts_activity
 from ein_agent_worker.activities.worker_config import load_utcp_config, load_worker_model
-from ein_agent_worker.httpx_config import HttpxConfigManager
+from ein_agent_worker.http import HttpxConfigManager
 from ein_agent_worker.models.gemini_litellm_provider import GeminiCompatibleLitellmProvider
 from ein_agent_worker.models.hitl import DEFAULT_MODEL
 from ein_agent_worker.utcp import registry as utcp_registry

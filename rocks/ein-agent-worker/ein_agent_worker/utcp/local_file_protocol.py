@@ -20,6 +20,7 @@ from utcp_http.http_call_template import HttpCallTemplate
 from utcp_http.http_communication_protocol import HttpCommunicationProtocol
 from utcp_http.openapi_converter import OpenApiConverter
 
+from ein_agent_worker.http.proxy import proxy_for_url
 from ein_agent_worker.utcp.openapi_handlers import DEFAULT_OPENAPI_HANDLERS, OpenApiHandler
 from ein_agent_worker.utcp.openapi_handlers.default import DefaultOpenApiHandler
 from utcp.data.call_template import CallTemplate
@@ -276,7 +277,7 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
                 )
 
             # Fetch spec from URL using httpx
-            async with httpx.AsyncClient(verify=False) as client:  # noqa: S501
+            async with httpx.AsyncClient(verify=False, proxy=proxy_for_url(http_url)) as client:  # noqa: S501
                 response = await client.get(http_url, headers=headers)
                 response.raise_for_status()
 

@@ -9,61 +9,24 @@ Applies process-wide monkey-patches to aiohttp:
    insecure=True for self-signed certs
 """
 
-import ipaddress
 import logging
-import os
 import ssl
 
 import aiohttp
 import aiohttp.helpers
 
-logger = logging.getLogger(__name__)
+from ein_agent_worker.http.proxy import should_bypass_proxy
 
-# Store original before patching
-_original_proxy_bypass = aiohttp.helpers.proxy_bypass
+logger = logging.getLogger(__name__)
 
 
 def _proxy_bypass_with_cidr(host, proxies=None):
     """Extended proxy_bypass with CIDR notation support.
 
-    aiohttp delegates to urllib's proxy_bypass_environment which only
-    supports exact IP matches and domain suffix matching. This adds
-    support for CIDR ranges (e.g., 10.0.0.0/8, 192.168.0.0/16) in NO_PROXY.
+    Thin wrapper around :func:`should_bypass_proxy` that matches the
+    signature expected by ``aiohttp.helpers.proxy_bypass``.
     """
-    no_proxy = os.environ.get('NO_PROXY', os.environ.get('no_proxy', ''))
-    if not no_proxy:
-        return False
-
-    try:
-        host_ip = ipaddress.ip_address(host)
-    except ValueError:
-        # Not an IP — fall back to original for domain suffix matching
-        return _original_proxy_bypass(host, proxies) if proxies else _original_proxy_bypass(host)
-
-    for entry in no_proxy.split(','):
-        entry = entry.strip()
-        if not entry:
-            continue
-
-        if entry == '*':
-            return True
-
-        # CIDR match
-        if '/' in entry:
-            try:
-                if host_ip in ipaddress.ip_network(entry, strict=False):
-                    return True
-            except ValueError:
-                continue
-
-        # Exact IP match
-        try:
-            if host_ip == ipaddress.ip_address(entry):
-                return True
-        except ValueError:
-            continue
-
-    return False
+    return should_bypass_proxy(host)
 
 
 class AiohttpConfigManager:
