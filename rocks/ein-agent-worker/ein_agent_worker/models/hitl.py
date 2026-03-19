@@ -136,7 +136,12 @@ class HITLConfig(BaseModel):
     max_turns: int = Field(
         default=50,
         ge=1,
-        description='Maximum agent turns before stopping',
+        description='Maximum conversation turns before stopping',
+    )
+    agent_max_turns: int = Field(
+        default=15,
+        ge=1,
+        description='Maximum agent turns per run before forcing a checkpoint back to planner',
     )
 
 

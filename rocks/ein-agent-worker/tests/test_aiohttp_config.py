@@ -5,7 +5,7 @@ from unittest.mock import patch
 import aiohttp
 import aiohttp.helpers
 
-from ein_agent_worker.utcp.aiohttp_config import (
+from ein_agent_worker.http.aiohttp_config import (
     AiohttpConfigManager,
     _proxy_bypass_with_cidr,
 )

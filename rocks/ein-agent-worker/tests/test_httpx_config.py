@@ -2,7 +2,7 @@ import httpx
 import pytest
 from httpx._utils import URLPattern
 
-from ein_agent_worker.httpx_config import HttpxConfigManager, _matches_with_cidr
+from ein_agent_worker.http.httpx_config import HttpxConfigManager, _matches_with_cidr
 
 
 @pytest.fixture(autouse=True)

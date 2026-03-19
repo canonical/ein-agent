@@ -6,6 +6,8 @@ import httpx
 from pydantic import BaseModel, Field
 from temporalio import activity
 
+from ein_agent_worker.http.proxy import proxy_for_url
+
 
 class AlertmanagerAlert(BaseModel):
     """Simplified Alertmanager alert model for activity."""
@@ -40,7 +42,7 @@ async def fetch_alerts_activity(params: FetchAlertsParams) -> list[dict]:
     api_url = f'{alertmanager_url.rstrip("/")}/api/v2/alerts'
     activity.logger.info(f'Querying Alertmanager API: {api_url}')
 
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=30, proxy=proxy_for_url(api_url)) as client:
         try:
             response = await client.get(api_url)
             response.raise_for_status()

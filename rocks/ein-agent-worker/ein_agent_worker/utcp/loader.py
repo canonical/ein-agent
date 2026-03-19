@@ -15,7 +15,7 @@ from typing import ClassVar
 import yaml
 from agents import function_tool
 
-from ein_agent_worker.utcp.aiohttp_config import AiohttpConfigManager
+from ein_agent_worker.http import AiohttpConfigManager
 from ein_agent_worker.utcp.local_file_protocol import (
     register_local_file_protocol,
     set_api_base_url,
