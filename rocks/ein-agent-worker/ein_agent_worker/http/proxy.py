@@ -76,8 +76,13 @@ def proxy_for_url(url: str) -> str | None:
     host = parsed.hostname
 
     if host and should_bypass_proxy(host):
+        logger.debug('proxy_for_url: %s -> DIRECT (NO_PROXY bypass)', url)
         return None
 
     if parsed.scheme == 'https':
-        return os.environ.get('HTTPS_PROXY', os.environ.get('https_proxy'))
-    return os.environ.get('HTTP_PROXY', os.environ.get('http_proxy'))
+        proxy = os.environ.get('HTTPS_PROXY', os.environ.get('https_proxy'))
+    else:
+        proxy = os.environ.get('HTTP_PROXY', os.environ.get('http_proxy'))
+
+    logger.debug('proxy_for_url: %s -> %s', url, proxy or 'DIRECT (no proxy configured)')
+    return proxy
