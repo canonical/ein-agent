@@ -40,9 +40,17 @@ async def fetch_alerts_activity(params: FetchAlertsParams) -> list[dict]:
         )
 
     api_url = f'{alertmanager_url.rstrip("/")}/api/v2/alerts'
-    activity.logger.info(f'Querying Alertmanager API: {api_url}')
 
-    async with httpx.AsyncClient(timeout=30, proxy=proxy_for_url(api_url)) as client:
+    proxy_url = proxy_for_url(api_url)
+    activity.logger.info(
+        'Querying Alertmanager API: %s (proxy=%s)', api_url, proxy_url or 'DIRECT'
+    )
+
+    # trust_env=False prevents httpx from re-reading HTTP_PROXY/HTTPS_PROXY
+    # from environment, since proxy_for_url already handles CIDR-aware
+    # NO_PROXY resolution.  Without this, httpx ignores our bypass decision
+    # and routes through the proxy anyway (proxy=None means "use default").
+    async with httpx.AsyncClient(timeout=30, proxy=proxy_url, trust_env=False) as client:
         try:
             response = await client.get(api_url)
             response.raise_for_status()

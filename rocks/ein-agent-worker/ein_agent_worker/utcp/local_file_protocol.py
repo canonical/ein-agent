@@ -277,7 +277,11 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
                 )
 
             # Fetch spec from URL using httpx
-            async with httpx.AsyncClient(verify=False, proxy=proxy_for_url(http_url)) as client:  # noqa: S501
+            async with httpx.AsyncClient(
+                verify=False,  # noqa: S501
+                proxy=proxy_for_url(http_url),
+                trust_env=False,
+            ) as client:
                 response = await client.get(http_url, headers=headers)
                 response.raise_for_status()
 
