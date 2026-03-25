@@ -382,6 +382,64 @@ Live URL loading:
 [kubernetes] Loading OpenAPI spec from LIVE URL: https://10.x.x.x:6443/openapi/v2
 ```
 
+## Proxy Configuration
+
+If your environment requires an HTTP proxy for external API calls (e.g., Gemini/LLM APIs),
+configure it via `juju model-config` using the `juju-` prefixed keys. The temporal-worker-k8s
+charm reads `JUJU_CHARM_HTTP_PROXY`, `JUJU_CHARM_HTTPS_PROXY`, `JUJU_CHARM_NO_PROXY`
+environment variables (injected from these keys) and sets them as `HTTP_PROXY`, `HTTPS_PROXY`,
+`NO_PROXY` in the Pebble service environment.
+
+### Set proxy via `juju model-config`
+
+```bash
+juju model-config -m temporal juju-http-proxy="http://<proxy-host>:<proxy-port>"
+juju model-config -m temporal juju-https-proxy="http://<proxy-host>:<proxy-port>"
+juju model-config -m temporal juju-no-proxy="<k8s-api-cluster-ip>,127.0.0.1,localhost,::1,.svc.cluster.local"
+```
+
+**Important notes:**
+
+- Use the **`juju-` prefixed** model-config keys (`juju-http-proxy`, `juju-https-proxy`,
+  `juju-no-proxy`). The plain `http-proxy`/`no-proxy` keys are **NOT** read by the
+  temporal-worker-k8s charm.
+- **Do NOT** put `HTTP_PROXY`, `HTTPS_PROXY`, or `NO_PROXY` in `environment.yaml` — they
+  will be overridden by the `juju-no-proxy` default (`127.0.0.1,localhost,::1`).
+- `juju-` prefixed model-config applies to **ALL charms** in the model.
+- **The Kubernetes API ClusterIP must be listed explicitly** in `juju-no-proxy` (e.g.,
+  the output of `kubectl get svc kubernetes -o jsonpath='{.spec.clusterIP}'`).
+  Juju agents connect to the K8s API by IP, not hostname, and use
+  `urllib.request.proxy_bypass()` which does **not** support CIDR notation. Without
+  this, Juju hooks will fail with TLS errors when saving secrets or communicating with
+  the K8s API. Find the ClusterIP with:
+  ```bash
+  kubectl get svc kubernetes -o jsonpath='{.spec.clusterIP}'
+  ```
+- The `.svc.cluster.local` suffix covers internal service-to-service traffic
+  (e.g., PostgreSQL endpoints, Temporal server) since those are resolved by hostname.
+- After changing model-config, the worker pod may need to be rescheduled for the Pebble
+  plan to pick up the new values.
+
+### CIDR-aware NO_PROXY
+
+The worker includes a CIDR-aware `NO_PROXY` implementation for both aiohttp (UTCP calls)
+and httpx. This allows CIDR notation (e.g., `10.0.0.0/8`) in `NO_PROXY`, which is not
+supported by Python's standard library or aiohttp/LiteLLM's built-in proxy bypass.
+
+CIDR bypass is applied automatically for UTCP calls (aiohttp). LiteLLM calls use
+`urllib.request.proxy_bypass()` (no CIDR support), but this is acceptable because
+LiteLLM only calls external APIs which are not in the `NO_PROXY` list.
+
+### Verify proxy configuration
+
+Check that the Pebble plan has the correct proxy values:
+
+```bash
+kubectl -n temporal exec ein-agent-worker-0 -c temporal-worker -- pebble plan | grep -iE 'proxy|aiohttp'
+```
+
+Expected output should include `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`, and `AIOHTTP_TRUST_ENV`.
+
 ## Offline/Air-gapped Deployment
 
 When deploying in restricted network environments, the worker may fail to connect to `openaipublic.blob.core.windows.net`. This is caused by **tiktoken** (the tokenizer library used by LiteLLM) attempting to download encoding files.

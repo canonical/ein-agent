@@ -3,93 +3,146 @@ import os
 from unittest.mock import patch
 
 import aiohttp
-import aiohttp.helpers
 
-from ein_agent_worker.http.aiohttp_config import (
-    AiohttpConfigManager,
-    _proxy_bypass_with_cidr,
-)
+from ein_agent_worker.http.aiohttp_config import AiohttpConfigManager
 
 
-class TestProxyBypassWithCidr:
-    """Tests for the CIDR-aware proxy_bypass function."""
+class TestAiohttpProxyResolution:
+    """Tests for explicit proxy resolution in _request."""
 
     def setup_method(self):
-        self.no_proxy = '10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,127.0.0.1,localhost,::1'
+        # Reset patch state so each test can re-apply
+        AiohttpConfigManager._proxy_configured = False
 
-    @patch.dict(os.environ, {'NO_PROXY': '10.0.0.0/8,192.168.0.0/16'})
-    def test_cidr_ipv4_match(self):
-        assert _proxy_bypass_with_cidr('10.42.0.5') is True
-        assert _proxy_bypass_with_cidr('10.0.0.1') is True
-        assert _proxy_bypass_with_cidr('10.255.255.255') is True
+    @patch.dict(
+        os.environ,
+        {
+            'NO_PROXY': '10.0.0.0/8,.svc.cluster.local',
+            'HTTPS_PROXY': 'http://squid.internal:3128',
+        },
+    )
+    def test_cidr_bypass_no_proxy_kwarg(self):
+        """Requests to NO_PROXY CIDR hosts should NOT get proxy= set."""
+        from ein_agent_worker.http.proxy import proxy_for_url
 
-    @patch.dict(os.environ, {'NO_PROXY': '10.0.0.0/8,192.168.0.0/16'})
-    def test_cidr_ipv4_no_match(self):
-        assert _proxy_bypass_with_cidr('172.16.0.1') is False
-        assert _proxy_bypass_with_cidr('8.8.8.8') is False
-        assert _proxy_bypass_with_cidr('11.0.0.1') is False
+        assert proxy_for_url('https://10.142.166.251:6443/api') is None
+        assert proxy_for_url('https://kubernetes.default.svc.cluster.local/api') is None
 
-    @patch.dict(os.environ, {'NO_PROXY': '192.168.0.0/16'})
-    def test_cidr_192_168_range(self):
-        assert _proxy_bypass_with_cidr('192.168.1.100') is True
-        assert _proxy_bypass_with_cidr('192.168.255.255') is True
-        assert _proxy_bypass_with_cidr('192.169.0.1') is False
+    @patch.dict(
+        os.environ,
+        {
+            'NO_PROXY': '10.0.0.0/8,.svc.cluster.local',
+            'HTTPS_PROXY': 'http://squid.internal:3128',
+        },
+    )
+    def test_non_bypass_gets_proxy_kwarg(self):
+        """Requests to non-bypassed hosts should get proxy= set."""
+        from ein_agent_worker.http.proxy import proxy_for_url
 
-    @patch.dict(os.environ, {'NO_PROXY': '127.0.0.1,localhost'})
-    def test_exact_ip_match(self):
-        assert _proxy_bypass_with_cidr('127.0.0.1') is True
-        assert _proxy_bypass_with_cidr('127.0.0.2') is False
+        result = proxy_for_url('https://googleapis.com/v1')
+        assert result == 'http://squid.internal:3128'
 
-    @patch.dict(os.environ, {'NO_PROXY': '*'})
-    def test_wildcard_bypasses_all(self):
-        assert _proxy_bypass_with_cidr('10.0.0.1') is True
-        assert _proxy_bypass_with_cidr('8.8.8.8') is True
+    @patch.dict(
+        os.environ,
+        {
+            'NO_PROXY': '10.0.0.0/8,.svc.cluster.local',
+            'HTTPS_PROXY': 'http://squid.internal:3128',
+        },
+    )
+    def test_request_patch_injects_proxy_for_external(self):
+        """The _request patch should inject proxy= for external URLs."""
+        captured = {}
 
-    @patch.dict(os.environ, {}, clear=False)
-    def test_no_proxy_empty(self):
-        os.environ.pop('NO_PROXY', None)
-        os.environ.pop('no_proxy', None)
-        assert _proxy_bypass_with_cidr('10.0.0.1') is False
+        async def fake_original(self, method, url, **kwargs):  # noqa: RUF029
+            captured.update(kwargs)
+            captured['method'] = method
+            captured['url'] = url
 
-    @patch.dict(os.environ, {'no_proxy': '10.0.0.0/8'})
-    def test_lowercase_no_proxy(self):
-        os.environ.pop('NO_PROXY', None)
-        assert _proxy_bypass_with_cidr('10.1.2.3') is True
+        AiohttpConfigManager._proxy_configured = False
+        with patch.object(aiohttp.ClientSession, '_request', fake_original):
+            AiohttpConfigManager._enable_proxy_env_support()
+            patched = aiohttp.ClientSession._request
 
-    @patch.dict(os.environ, {'NO_PROXY': '.svc.cluster.local,.canonical.com'})
-    def test_domain_suffix_falls_back_to_original(self):
-        # Domain hosts should fall back to the original proxy_bypass
-        # which handles domain suffix matching
-        result = _proxy_bypass_with_cidr('kubernetes.default.svc.cluster.local')
-        # Result depends on original implementation; just verify no crash
-        assert isinstance(result, bool)
+            async def _run():
+                session = aiohttp.ClientSession()
+                try:
+                    await patched(session, 'GET', 'https://googleapis.com/v1')
+                finally:
+                    await session.close()
 
-    @patch.dict(os.environ, {'NO_PROXY': '10.0.0.0/8, 192.168.0.0/16 , 127.0.0.1'})
-    def test_whitespace_in_entries(self):
-        assert _proxy_bypass_with_cidr('10.1.1.1') is True
-        assert _proxy_bypass_with_cidr('192.168.1.1') is True
-        assert _proxy_bypass_with_cidr('127.0.0.1') is True
+            asyncio.run(_run())
 
-    @patch.dict(os.environ, {'NO_PROXY': '10.0.0.0/8,,,,192.168.0.0/16'})
-    def test_empty_entries_ignored(self):
-        assert _proxy_bypass_with_cidr('10.1.1.1') is True
-        assert _proxy_bypass_with_cidr('192.168.1.1') is True
+        assert captured.get('proxy') == 'http://squid.internal:3128'
 
-    @patch.dict(os.environ, {'NO_PROXY': 'invalid-cidr/99,10.0.0.0/8'})
-    def test_invalid_cidr_skipped(self):
-        # Invalid CIDR should be skipped, valid ones still work
-        assert _proxy_bypass_with_cidr('10.1.1.1') is True
+    @patch.dict(
+        os.environ,
+        {
+            'NO_PROXY': '10.0.0.0/8,.svc.cluster.local',
+            'HTTPS_PROXY': 'http://squid.internal:3128',
+        },
+    )
+    def test_request_patch_no_proxy_for_bypass(self):
+        """The _request patch should NOT inject proxy= for bypassed URLs."""
+        captured = {}
 
-    @patch.dict(os.environ, {'NO_PROXY': 'fd00::/8'})
-    def test_ipv6_cidr(self):
-        assert _proxy_bypass_with_cidr('fd00::1') is True
-        assert _proxy_bypass_with_cidr('fe80::1') is False
+        async def fake_original(self, method, url, **kwargs):  # noqa: RUF029
+            captured.update(kwargs)
+            captured['method'] = method
+            captured['url'] = url
 
+        AiohttpConfigManager._proxy_configured = False
+        with patch.object(aiohttp.ClientSession, '_request', fake_original):
+            AiohttpConfigManager._enable_proxy_env_support()
+            patched = aiohttp.ClientSession._request
 
-class TestAiohttpConfigManagerTrustEnv:
-    """Tests for aiohttp trust_env patching."""
+            async def _run():
+                session = aiohttp.ClientSession()
+                try:
+                    await patched(session, 'GET', 'https://10.142.166.251:6443/api')
+                finally:
+                    await session.close()
 
-    def test_trust_env_defaults_true_after_patch(self):
+            asyncio.run(_run())
+
+        assert 'proxy' not in captured
+
+    @patch.dict(
+        os.environ,
+        {
+            'NO_PROXY': '10.0.0.0/8,.svc.cluster.local',
+            'HTTPS_PROXY': 'http://squid.internal:3128',
+        },
+    )
+    def test_explicit_proxy_kwarg_not_overridden(self):
+        """If caller passes proxy= explicitly, the patch should not override it."""
+        captured = {}
+
+        async def fake_original(self, method, url, **kwargs):  # noqa: RUF029
+            captured.update(kwargs)
+
+        AiohttpConfigManager._proxy_configured = False
+        with patch.object(aiohttp.ClientSession, '_request', fake_original):
+            AiohttpConfigManager._enable_proxy_env_support()
+            patched = aiohttp.ClientSession._request
+
+            async def _run():
+                session = aiohttp.ClientSession()
+                try:
+                    await patched(
+                        session,
+                        'GET',
+                        'https://googleapis.com/v1',
+                        proxy='http://custom:8080',
+                    )
+                finally:
+                    await session.close()
+
+            asyncio.run(_run())
+
+        assert captured['proxy'] == 'http://custom:8080'
+
+    def test_trust_env_not_set_to_true(self):
+        """After patch, new sessions should NOT have trust_env=True."""
         AiohttpConfigManager()
 
         async def _check():
@@ -97,24 +150,34 @@ class TestAiohttpConfigManagerTrustEnv:
                 return session._trust_env
 
         result = asyncio.run(_check())
-        assert result is True
-
-    def test_explicit_trust_env_false_not_overridden(self):
-        AiohttpConfigManager()
-
-        async def _check():
-            async with aiohttp.ClientSession(trust_env=False) as session:
-                return session._trust_env
-
-        result = asyncio.run(_check())
+        # trust_env should be False (default) — we no longer patch it
         assert result is False
 
-    def test_proxy_bypass_patched(self):
-        AiohttpConfigManager()
-        assert aiohttp.helpers.proxy_bypass is _proxy_bypass_with_cidr
-
     def test_idempotent(self):
+        """Applying the patch multiple times should not error or double-wrap."""
         AiohttpConfigManager()
         AiohttpConfigManager()
-        # No error, patch applied only once
-        assert aiohttp.helpers.proxy_bypass is _proxy_bypass_with_cidr
+        # No error — _proxy_configured prevents double-patching
+        assert AiohttpConfigManager._proxy_configured is True
+
+
+class TestAiohttpSSLBypass:
+    """Tests for SSL verification bypass."""
+
+    def test_ssl_patch_composes_with_proxy_patch(self):
+        """SSL patch should compose on top of proxy patch."""
+        AiohttpConfigManager._proxy_configured = False
+        mgr = AiohttpConfigManager()
+        mgr.disable_ssl_verification()
+
+        # The _request chain should be: ssl_patch → proxy_patch → original
+        # Verify both patches are active
+        assert mgr._ssl_configured is True
+        assert AiohttpConfigManager._proxy_configured is True
+
+    def test_ssl_idempotent(self):
+        """Applying SSL patch multiple times should not error."""
+        mgr = AiohttpConfigManager()
+        mgr.disable_ssl_verification()
+        mgr.disable_ssl_verification()
+        assert mgr._ssl_configured is True

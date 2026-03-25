@@ -1,11 +1,9 @@
 """aiohttp configuration management for UTCP clients.
 
 Applies process-wide monkey-patches to aiohttp:
-1. CIDR-aware NO_PROXY (unconditional): patches aiohttp.helpers.proxy_bypass
-   so NO_PROXY entries like 10.0.0.0/8 are matched correctly
-2. Proxy env support (unconditional): trust_env=True so
-   HTTP_PROXY/HTTPS_PROXY/NO_PROXY are respected
-3. SSL verification bypass (conditional): disabled only when
+1. Explicit CIDR-aware proxy resolution in _request: calls proxy_for_url()
+   directly, bypassing aiohttp's trust_env → get_env_proxy_for_url chain
+2. SSL verification bypass (conditional): disabled only when
    insecure=True for self-signed certs
 """
 
@@ -13,29 +11,18 @@ import logging
 import ssl
 
 import aiohttp
-import aiohttp.helpers
 
-from ein_agent_worker.http.proxy import should_bypass_proxy
+from ein_agent_worker.http.proxy import proxy_for_url
 
 logger = logging.getLogger(__name__)
-
-
-def _proxy_bypass_with_cidr(host, proxies=None):
-    """Extended proxy_bypass with CIDR notation support.
-
-    Thin wrapper around :func:`should_bypass_proxy` that matches the
-    signature expected by ``aiohttp.helpers.proxy_bypass``.
-    """
-    return should_bypass_proxy(host)
 
 
 class AiohttpConfigManager:
     """Configure aiohttp defaults for UTCP clients.
 
     Applies process-wide monkey-patches to aiohttp:
-    1. CIDR-aware NO_PROXY via aiohttp.helpers.proxy_bypass
-    2. trust_env=True by default on ClientSession
-    3. SSL verification bypass (conditional)
+    1. Explicit proxy resolution in _request via proxy_for_url()
+    2. SSL verification bypass (conditional)
 
     All patches are idempotent and tracked via class state.
     """
@@ -48,31 +35,34 @@ class AiohttpConfigManager:
 
     @classmethod
     def _enable_proxy_env_support(cls) -> None:
-        """Patch aiohttp proxy env var handling.
+        """Patch aiohttp _request to resolve proxy explicitly.
 
-        1. Patches aiohttp.helpers.proxy_bypass to support CIDR in NO_PROXY
-        2. Patches aiohttp.ClientSession to default trust_env=True
+        Instead of relying on trust_env=True + proxy_bypass (which breaks
+        in the Temporal worker runtime due to module-global instability),
+        we inject proxy= directly into every _request call using the same
+        proxy_for_url() that works for httpx clients.
 
         Idempotent.
         """
         if cls._proxy_configured:
             return
 
-        # Patch aiohttp's proxy_bypass for CIDR support
-        aiohttp.helpers.proxy_bypass = _proxy_bypass_with_cidr
+        original_request = aiohttp.ClientSession._request
 
-        # Patch aiohttp to read proxy env vars (trust_env=True)
-        original_session_init = aiohttp.ClientSession.__init__
+        async def _patched_request_with_proxy(self, method, url, **kwargs):
+            # Force trust_env=False to prevent aiohttp's internal proxy resolution
+            # (which doesn't support CIDR) from overriding our explicit proxy
+            self._trust_env = False
+            if 'proxy' not in kwargs:
+                resolved = proxy_for_url(str(url))
+                if resolved is not None:
+                    kwargs['proxy'] = resolved
+            return await original_request(self, method, url, **kwargs)
 
-        def _patched_session_init(self, *args, **kwargs):
-            if 'trust_env' not in kwargs:
-                kwargs['trust_env'] = True
-            original_session_init(self, *args, **kwargs)
-
-        aiohttp.ClientSession.__init__ = _patched_session_init
+        aiohttp.ClientSession._request = _patched_request_with_proxy
 
         cls._proxy_configured = True
-        logger.info('aiohttp patched: CIDR-aware NO_PROXY + trust_env=True')
+        logger.info('aiohttp patched: explicit CIDR-aware proxy resolution in _request')
 
     def disable_ssl_verification(self) -> None:
         """Disable SSL certificate verification globally for aiohttp.
@@ -98,7 +88,8 @@ class AiohttpConfigManager:
 
         aiohttp.TCPConnector.__init__ = _patched_init
 
-        # Also patch ClientSession to pass ssl=False by default
+        # Also patch ClientSession._request to pass ssl=False by default
+        # This composes on top of the proxy patch (captures already-patched _request)
         original_request = aiohttp.ClientSession._request
 
         async def _patched_request(self, method, url, **kwargs):

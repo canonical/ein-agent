@@ -2,7 +2,7 @@ env:
   # UTCP Service Configuration
   # Services are configured via OpenAPI spec endpoints
   - name: UTCP_SERVICES
-    value: kubernetes,grafana,ceph
+    value: kubernetes,grafana,prometheus,loki
 
   # Kubernetes UTCP Configuration
   # NOTE: Kubernetes ONLY supports kubeconfig auth (no bearer token support)
@@ -30,23 +30,44 @@ env:
   - name: UTCP_GRAFANA_INSECURE
     value: "true"  # For self-signed certificates
 
-  # Ceph UTCP Configuration
-  - name: UTCP_CEPH_OPENAPI_URL
-    value: https://ceph-mgr.ceph.svc.cluster.local:8443/api/openapi.json
-  - name: UTCP_CEPH_AUTH_TYPE
-    value: jwt
-  - name: UTCP_CEPH_ENABLED
+  # Prometheus UTCP Configuration
+  # NOTE: Prometheus typically requires no authentication when accessed via COS proxy
+  - name: UTCP_PROMETHEUS_OPENAPI_URL
+    value: http://prometheus.cos.svc.cluster.local:9090
+  - name: UTCP_PROMETHEUS_AUTH_TYPE
+    value: none  # No authentication required
+  - name: UTCP_PROMETHEUS_ENABLED
     value: "true"
-  - name: UTCP_CEPH_VERSION
-    value: tentacle
+  - name: UTCP_PROMETHEUS_VERSION
+    value: "3.5.0"
 
-  # Agent's model
+  # Loki UTCP Configuration
+  # NOTE: Loki uses a hand-written OpenAPI spec (Loki does not ship an official one)
+  # No authentication required when accessed via COS proxy
+  - name: UTCP_LOKI_OPENAPI_URL
+    value: http://loki.cos.svc.cluster.local:3100
+  - name: UTCP_LOKI_AUTH_TYPE
+    value: none  # No authentication required
+  - name: UTCP_LOKI_ENABLED
+    value: "true"
+  - name: UTCP_LOKI_VERSION
+    value: "3"
+
+  # Agent model
   - name: EIN_AGENT_MODEL
     value: "gemini/gemini-3-flash-preview"
 
-  # Alertmanager Configuration
+  # Alertmanager
   - name: ALERTMANAGER_URL
     value: http://alertmanager.cos.svc.cluster.local:9093
+
+  # LiteLLM: disable SSL verification (ONLY for mitmproxy debugging, remove for production)
+  # - name: SSL_VERIFY
+  #   value: "False"
+
+  # Proxy env vars (HTTP_PROXY, HTTPS_PROXY, NO_PROXY) are injected by
+  # juju model-config (juju-http-proxy, juju-https-proxy, juju-no-proxy),
+  # NOT set here — see docs/how-to-deploy-ein-agent.md for details.
 
 juju:
   # Gemini API key

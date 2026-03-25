@@ -396,7 +396,7 @@ test = [
 [package.metadata]
 requires-dist = [
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "litellm", specifier = ">=1.80.0" },
+    { name = "litellm", specifier = ">=1.80.0,!=1.82.7,!=1.82.8" },
     { name = "openai-agents", specifier = ">=0.6.0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
     { name = "temporalio", specifier = ">=1.19.0" },
