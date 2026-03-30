@@ -1,6 +1,6 @@
 name: ein-agent
 base: core24
-version: '0.1.0'
+version: '0.2.0'
 summary: AI-powered interactive investigation CLI for operations events
 description: |
   Ein Agent CLI is a command-line interface for triggering and managing

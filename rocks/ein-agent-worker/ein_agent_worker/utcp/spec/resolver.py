@@ -8,7 +8,13 @@ from ein_agent_worker.utcp.config import DEFAULT_VERSIONS
 logger = logging.getLogger(__name__)
 
 # Suffixes to strip from OpenAPI URLs to get the API base URL
-_OPENAPI_SUFFIXES = ['/openapi/v2', '/openapi/v3', '/openapi']
+_OPENAPI_SUFFIXES = [
+    '/openapi/v2',
+    '/openapi/v3',
+    '/openapi',
+    '/api/swagger.json',
+    '/swagger.json',
+]
 
 
 def strip_openapi_suffix(url: str) -> str:

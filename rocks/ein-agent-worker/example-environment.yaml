@@ -20,7 +20,7 @@ env:
   # Grafana UTCP Configuration
   # NOTE: Grafana uses bearer token (service account token)
   - name: UTCP_GRAFANA_OPENAPI_URL
-    value: https://grafana.cos.svc.cluster.local:3000/api/swagger.json
+    value: http://grafana.cos.svc.cluster.local:3000/api/swagger.json
   - name: UTCP_GRAFANA_AUTH_TYPE
     value: bearer  # Service account token
   - name: UTCP_GRAFANA_ENABLED

@@ -4,22 +4,16 @@ Architecture:
 - Domain experts are specialized for specific infrastructure domains
 - Each domain expert receives UTCP tools relevant to their domain
 - Example: StorageSpecialist receives ceph tools, kubernetes tools (for PVCs)
+- Instructions are dynamically formatted at agent creation time with available
+  services and skills, so agents have immediate situational awareness
 """
 
 from collections.abc import Callable
-from enum import StrEnum
+from string import Template
 
 from agents import Agent
 
-
-class DomainType(StrEnum):
-    """Domain types for specialist agents."""
-
-    COMPUTE = 'compute'
-    STORAGE = 'storage'
-    NETWORK = 'network'
-    OBSERVABILITY = 'observability'
-
+from ein_agent_worker.models.domain import DomainType, SkillInfo
 
 # =============================================================================
 # Domain to UTCP Services Mapping
@@ -32,11 +26,87 @@ DOMAIN_UTCP_SERVICES: dict[DomainType, set[str]] = {
     DomainType.OBSERVABILITY: {'grafana', 'prometheus', 'loki'},
 }
 
+DOMAIN_NAMES: dict[DomainType, str] = {
+    DomainType.COMPUTE: 'ComputeSpecialist',
+    DomainType.STORAGE: 'StorageSpecialist',
+    DomainType.NETWORK: 'NetworkSpecialist',
+    DomainType.OBSERVABILITY: 'ObservabilitySpecialist',
+}
+
+
+# =============================================================================
+# Instruction Section Builders (public API - used by instructions.py too)
+# =============================================================================
+
+
+def build_services_section(available_services: list[str]) -> str:
+    """Build the UTCP services section for agent instructions."""
+    if not available_services:
+        return (
+            'NOTE: No UTCP services are currently configured for your domain. '
+            'You can only use shared context tools and skills.'
+        )
+    service_list = ', '.join(f'`{s}`' for s in sorted(available_services))
+    tool_lines = []
+    for s in sorted(available_services):
+        tool_lines.append(f'- `search_{s}_operations` - Search for API operations by keyword')
+        tool_lines.append(f'- `get_{s}_operation_details` - Get parameter schema for an operation')
+        tool_lines.append(f'- `call_{s}_operation` - Execute an API operation')
+        tool_lines.append(
+            f'- `list_{s}_operations` - List available operations (with tag filtering)'
+        )
+    tools_block = '\n'.join(tool_lines)
+    return (
+        f'You have UTCP tools for the following services: {service_list}.\n'
+        f'Your available tools:\n{tools_block}'
+    )
+
+
+def build_skills_section(
+    available_skills: list[SkillInfo] | None,
+    domain: str,
+) -> str:
+    """Build the skills section for agent instructions.
+
+    Args:
+        available_skills: Skill metadata for all registered skills
+        domain: Domain to highlight (skills matching this domain shown first).
+                Pass empty string to show all skills without domain grouping.
+    """
+    if not available_skills:
+        return 'No knowledge resources (skills) are currently available.'
+
+    lines = ['You have access to the following knowledge resources (skills):']
+
+    if domain:
+        # Group by domain relevance for specialist agents
+        domain_skills = [(s.name, s.description) for s in available_skills if s.domain == domain]
+        other_skills = [(s.name, s.description) for s in available_skills if s.domain != domain]
+        if domain_skills:
+            lines.append('\n**Your domain skills** (use these first):')
+            for name, desc in domain_skills:
+                lines.append(f'- `{name}`: {desc}')
+        if other_skills:
+            lines.append('\n**Other available skills:**')
+            for name, desc in other_skills:
+                lines.append(f'- `{name}`: {desc}')
+    else:
+        # Show all skills flat (for agents that span all domains)
+        lines.extend(
+            f'- `{skill.name}` ({skill.domain}): {skill.description}' for skill in available_skills
+        )
+
+    lines.append(
+        '\nUse `read_skill(skill_name)` to load the full content of any skill. '
+        'No need to call `list_skills` first -- the available skills are listed above.'
+    )
+    return '\n'.join(lines)
+
 
 # =============================================================================
 # Compute Specialist
 # =============================================================================
-COMPUTE_SPECIALIST_INSTRUCTIONS = """\
+_COMPUTE_SPECIALIST_TEMPLATE = Template("""\
 You are the Compute Specialist (Container Orchestration Domain Expert).
 
 Your role: Technical expert for container orchestration and compute resources.
@@ -50,15 +120,13 @@ issues are already known.
 - If a node issue is already recorded, focus on confirming impact
 - If no relevant findings, proceed with full investigation
 
-### STEP 2: INVESTIGATE WITH YOUR UTCP TOOLS
-You have UTCP tools for your domain. For each configured service, you have:
-- `search_{service}_operations` - Search for API operations by keyword
-- `get_{service}_operation_details` - Get parameter schema for an operation
-- `call_{service}_operation` - Execute an API operation
-- `list_{service}_operations` - List available operations (with tag filtering)
+### STEP 2: INVESTIGATE WITH YOUR TOOLS
+$available_services_section
 
 TIP: Use `list_*_operations` to browse available tools efficiently. \
 Use `search_*_operations` when you know what you're looking for.
+
+$available_skills_section
 
 Use your tools to investigate:
 - Pod status, events, logs
@@ -99,13 +167,13 @@ the next steps.
 - Key findings: [specific issues]
 - Root cause in compute layer: Yes/No/Uncertain
 - Shared context updated: Yes/No (what key)
-"""
+""")
 
 
 # =============================================================================
 # Storage Specialist
 # =============================================================================
-STORAGE_SPECIALIST_INSTRUCTIONS = """\
+_STORAGE_SPECIALIST_TEMPLATE = Template("""\
 You are the Storage Specialist (Distributed Storage Domain Expert).
 
 Your role: Technical expert for distributed storage and persistent volumes.
@@ -119,15 +187,13 @@ issues are already known.
 - If a storage issue is already recorded, focus on confirming impact
 - If no relevant findings, proceed with full investigation
 
-### STEP 2: INVESTIGATE WITH YOUR UTCP TOOLS
-You have UTCP tools for your domain. For each configured service, you have:
-- `search_{service}_operations` - Search for API operations by keyword
-- `get_{service}_operation_details` - Get parameter schema for an operation
-- `call_{service}_operation` - Execute an API operation
-- `list_{service}_operations` - List available operations (with tag filtering)
+### STEP 2: INVESTIGATE WITH YOUR TOOLS
+$available_services_section
 
 TIP: Use `list_*_operations` to browse available tools efficiently. \
 Use `search_*_operations` when you know what you're looking for.
+
+$available_skills_section
 
 Use your tools to investigate:
 - Storage cluster health
@@ -175,13 +241,13 @@ the next steps.
 - Key findings: [specific issues]
 - Root cause in storage layer: Yes/No/Uncertain
 - Shared context updated: Yes/No (what key)
-"""
+""")
 
 
 # =============================================================================
 # Network Specialist
 # =============================================================================
-NETWORK_SPECIALIST_INSTRUCTIONS = """\
+_NETWORK_SPECIALIST_TEMPLATE = Template("""\
 You are the Network Specialist (Network Domain Expert).
 
 Your role: Technical expert for network connectivity, DNS, and load balancing.
@@ -195,15 +261,13 @@ related issues are already known.
 - If a network issue is already recorded, focus on confirming impact
 - If no relevant findings, proceed with full investigation
 
-### STEP 2: INVESTIGATE WITH YOUR UTCP TOOLS
-You have UTCP tools for your domain. For each configured service, you have:
-- `search_{service}_operations` - Search for API operations by keyword
-- `get_{service}_operation_details` - Get parameter schema for an operation
-- `call_{service}_operation` - Execute an API operation
-- `list_{service}_operations` - List available operations (with tag filtering)
+### STEP 2: INVESTIGATE WITH YOUR TOOLS
+$available_services_section
 
 TIP: Use `list_*_operations` to browse available tools efficiently. \
 Use `search_*_operations` when you know what you're looking for.
+
+$available_skills_section
 
 Use your tools to investigate:
 - Service endpoints and port mappings
@@ -250,13 +314,13 @@ the next steps.
 - Key findings: [specific issues]
 - Root cause in network layer: Yes/No/Uncertain
 - Shared context updated: Yes/No (what key)
-"""
+""")
 
 
 # =============================================================================
 # Observability Specialist
 # =============================================================================
-OBSERVABILITY_SPECIALIST_INSTRUCTIONS = """\
+_OBSERVABILITY_SPECIALIST_TEMPLATE = Template("""\
 You are the Observability Specialist (Monitoring & Logging Domain Expert).
 
 Your role: Technical expert for monitoring, metrics, logs, and alerting. You query \
@@ -272,15 +336,13 @@ issues are already known.
 - If a metric or log issue is already recorded, focus on confirming impact
 - If no relevant findings, proceed with full investigation
 
-### STEP 2: INVESTIGATE WITH YOUR UTCP TOOLS
-You have UTCP tools for your domain. For each configured service, you have:
-- `search_{service}_operations` - Search for API operations by keyword
-- `get_{service}_operation_details` - Get parameter schema for an operation
-- `call_{service}_operation` - Execute an API operation
-- `list_{service}_operations` - List available operations (with tag filtering)
+### STEP 2: INVESTIGATE WITH YOUR TOOLS
+$available_services_section
 
 TIP: Use `list_*_operations` to browse available tools efficiently. \
 Use `search_*_operations` when you know what you're looking for.
+
+$available_skills_section
 
 Use your tools to investigate:
 - Dashboards (list, search, get details)
@@ -330,42 +392,52 @@ the next steps.
 - Key findings: [specific issues with metric values or log evidence]
 - Root cause in observability data: Yes/No/Uncertain
 - Shared context updated: Yes/No (what key)
-"""
+""")
 
 
 # =============================================================================
-# Instruction and Name Mapping
+# Template Mapping
 # =============================================================================
-DOMAIN_INSTRUCTIONS: dict[DomainType, str] = {
-    DomainType.COMPUTE: COMPUTE_SPECIALIST_INSTRUCTIONS,
-    DomainType.STORAGE: STORAGE_SPECIALIST_INSTRUCTIONS,
-    DomainType.NETWORK: NETWORK_SPECIALIST_INSTRUCTIONS,
-    DomainType.OBSERVABILITY: OBSERVABILITY_SPECIALIST_INSTRUCTIONS,
-}
-
-DOMAIN_NAMES: dict[DomainType, str] = {
-    DomainType.COMPUTE: 'ComputeSpecialist',
-    DomainType.STORAGE: 'StorageSpecialist',
-    DomainType.NETWORK: 'NetworkSpecialist',
-    DomainType.OBSERVABILITY: 'ObservabilitySpecialist',
+_DOMAIN_TEMPLATES: dict[DomainType, Template] = {
+    DomainType.COMPUTE: _COMPUTE_SPECIALIST_TEMPLATE,
+    DomainType.STORAGE: _STORAGE_SPECIALIST_TEMPLATE,
+    DomainType.NETWORK: _NETWORK_SPECIALIST_TEMPLATE,
+    DomainType.OBSERVABILITY: _OBSERVABILITY_SPECIALIST_TEMPLATE,
 }
 
 
 def new_specialist_agent(
-    domain: DomainType, model: str, tools: list[Callable] | None = None
+    domain: DomainType,
+    model: str,
+    tools: list[Callable] | None = None,
+    available_services: list[str] | None = None,
+    available_skills: list[SkillInfo] | None = None,
 ) -> Agent:
-    """Create a new domain specialist agent.
+    """Create a new domain specialist agent with dynamic instructions.
+
+    Instructions are formatted at creation time with the available UTCP services
+    and skills, giving the agent immediate situational awareness.
 
     Args:
-        domain: The domain type (COMPUTE, STORAGE, NETWORK)
+        domain: The domain type (COMPUTE, STORAGE, NETWORK, OBSERVABILITY)
         model: LLM model to use
         tools: Optional list of tools (e.g., shared context tools, UTCP tools)
+        available_services: UTCP service names available for this domain
+        available_skills: Skill metadata for all registered skills
 
     Returns:
         Configured specialist Agent
     """
     name = DOMAIN_NAMES[domain]
-    instructions = DOMAIN_INSTRUCTIONS[domain]
+    template = _DOMAIN_TEMPLATES[domain]
+
+    services_section = build_services_section(available_services or [])
+    skills_section = build_skills_section(available_skills, domain.value)
+
+    instructions = template.substitute(
+        available_services_section=services_section,
+        available_skills_section=skills_section,
+    )
 
     return Agent(
         name=name,

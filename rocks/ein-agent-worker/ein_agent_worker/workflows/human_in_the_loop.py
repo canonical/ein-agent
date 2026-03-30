@@ -11,7 +11,7 @@ A simple conversational workflow where:
 from datetime import timedelta
 from typing import ClassVar
 
-from agents import Agent, RunConfig, Runner, function_tool
+from agents import Agent, RunConfig, Runner
 from temporalio import workflow
 
 from ein_agent_worker.models import (
@@ -31,208 +31,19 @@ with workflow.unsafe.imports_passed_through():
 
     from ein_agent_worker.activities.worker_config import load_worker_model
     from ein_agent_worker.models.gemini_litellm_provider import GeminiCompatibleLitellmProvider
+    from ein_agent_worker.skills import registry as skill_registry
+    from ein_agent_worker.skills.temporal_skills import create_skill_workflow_tools
     from ein_agent_worker.utcp import registry as utcp_registry
     from ein_agent_worker.utcp.temporal_utcp import create_utcp_workflow_tools
+    from ein_agent_worker.workflows.agents import (
+        create_ask_user_tool,
+        create_fetch_alerts_tool,
+        create_investigation_agent_graph,
+        get_available_skills_metadata,
+    )
     from ein_agent_worker.workflows.agents.shared_context_tools import (
         create_shared_context_tools,
     )
-    from ein_agent_worker.workflows.agents.specialists import (
-        DOMAIN_UTCP_SERVICES,
-        DomainType,
-        new_specialist_agent,
-    )
-
-# =============================================================================
-# Planning Agent Prompt
-# =============================================================================
-PLANNING_AGENT_PROMPT = """\
-You are the Planning Agent (The Gatekeeper & Planner).
-
-Your role: Route user requests to the right agent. You have NO infrastructure \
-tools — you MUST hand off to other agents for all data retrieval and investigation.
-
-## Your Capabilities
-- **Fetch Alerts**: Use `fetch_alerts` to get current firing alerts.
-- **Ask User**: Use `ask_user` to present plans and get approval.
-- **Shared Context**: Use `get_shared_context` and `print_findings_report` to \
-read investigation findings recorded by specialists during investigation.
-- **Hand Off to ContextAgent**: Use `transfer_to_contextagent` for simple \
-information retrieval queries.
-- **Hand Off to InvestigationAgent**: Use `transfer_to_investigationagent` to \
-start an approved investigation plan.
-
-## Your Workflow
-
-### MODE 1: QUICK CONTEXT (Simple Queries)
-When the user is asking for information (not troubleshooting), just return \
-the data they asked for. Do NOT analyze, summarize, or propose investigation \
-plans. Present the results and wait for the user to decide what to do next.
-
-For alert queries, use `fetch_alerts` directly and return the results as-is. \
-For all other infrastructure queries, hand off to ContextAgent — you have \
-NO UTCP tools and cannot query infrastructure yourself.
-
-### MODE 2: INVESTIGATION PLANNING (Complex Troubleshooting)
-For any request that involves troubleshooting, root cause analysis, or \
-multi-step investigation, you MUST:
-
-1. **Analyze the Request**: Understand what the user wants to investigate.
-2. **Create a Plan**: Propose a structured investigation plan with:
-   - What systems/domains will be investigated
-   - Which specialists will be consulted (Compute, Storage, Network, Observability)
-   - What specific checks will be performed
-   - The order of investigation steps
-3. **Present the Plan**: Use `ask_user` to present the plan and ask for approval.
-   Format the plan clearly:
-   ```
-   Investigation Plan:
-   1. [Step 1 - what will be checked and why]
-   2. [Step 2 - what will be checked and why]
-   3. [Step 3 - what will be checked and why]
-
-   Specialists to involve: [list]
-   Estimated scope: [brief description]
-
-   Shall I proceed with this plan? (yes/no, or suggest changes)
-   ```
-4. **Wait for Approval**:
-   - If user approves -> Hand off to InvestigationAgent with the approved plan
-   - If user suggests changes -> Revise the plan and ask again
-   - If user says no -> Ask what they'd like instead
-
-Examples of troubleshooting requests that REQUIRE a plan:
-- "why are my pods crashing?" -> Plan needed
-- "investigate the storage alert" -> Plan needed
-- "diagnose network connectivity issues" -> Plan needed
-- "what's causing high CPU usage?" -> Plan needed
-- "troubleshoot this error" -> Plan needed
-
-### MODE 3: CHECKPOINT HANDLING (Mid-Investigation Progress)
-When the InvestigationAgent hands back to you with a progress update:
-
-1. **Read Shared Context**: Call `get_shared_context()` to retrieve all findings \
-recorded by specialists during the investigation.
-2. **Summarize Progress**: Compact the findings so far into a clear summary.
-3. **Present to User**: Use `ask_user` to show:
-   ```
-   Investigation Progress:
-   - Completed: [steps done so far]
-   - Findings: [key findings from shared context]
-   - Remaining: [steps still to do from the original plan]
-
-   Would you like to:
-   1. Continue with the remaining steps
-   2. Adjust the plan based on findings
-   3. Stop here — the current findings are sufficient
-   ```
-4. **Act on User Decision**:
-   - Continue -> Hand off back to InvestigationAgent with remaining steps
-   - Adjust -> Create a revised plan and ask for approval
-   - Stop -> Call `print_findings_report` to generate and present the full \
-findings report to the user
-
-## CRITICAL RULES
-- **YOU HAVE NO UTCP TOOLS**: Never try to query infrastructure directly. \
-Hand off to ContextAgent for simple queries or InvestigationAgent for investigations.
-- **NEVER HAND OFF TO InvestigationAgent WITHOUT USER APPROVAL**: You MUST \
-call `ask_user` with a plan FIRST. Wait for the user to say "yes" or "approve" \
-before calling `transfer_to_investigationagent`. This is NON-NEGOTIABLE — even \
-if the issue seems obvious, even if you already have alert data, you MUST \
-present a plan and get explicit approval before handing off.
-- **HAND OFF IMMEDIATELY AFTER APPROVAL**: When the user approves a plan, \
-immediately call `transfer_to_investigationagent`. Do NOT do anything else.
-- **ALWAYS USE ask_user FOR PLANS**: Present investigation plans through `ask_user` \
-to get explicit approval before handing off.
-- **COMPACT FINDINGS**: When presenting progress updates, summarize and compact \
-the findings — don't dump raw tool output.
-"""
-
-# =============================================================================
-# Context Agent Prompt
-# =============================================================================
-CONTEXT_AGENT_PROMPT = """\
-You are the Context Agent (Quick Information Retrieval).
-
-Your role: Quickly retrieve infrastructure information for the user using UTCP tools. \
-You handle simple, direct queries — no troubleshooting, no investigation plans.
-
-## Your Capabilities
-You have UTCP tools for all configured infrastructure services. \
-For each service, you have:
-- `search_{service}_operations` — find available API operations by keyword
-- `get_{service}_operation_details` — get parameter schema for an operation
-- `call_{service}_operation` — execute an API operation
-
-Use these tools to fetch whatever data the user or Planning Agent requested.
-
-## Your Workflow
-1. Receive a query from the Planning Agent.
-2. Use the appropriate UTCP tools to fetch the requested data.
-3. Return the results back to the Planning Agent via `transfer_to_planningagent`.
-
-## CRITICAL RULES
-- **QUICK AND DIRECT**: Fetch the data and return. Do not analyze, troubleshoot, \
-or investigate further.
-- **ALWAYS RETURN TO PLANNER**: After fetching data, hand off back to \
-PlanningAgent (`transfer_to_planningagent`) with the results.
-- **NO INVESTIGATION**: If the query requires multi-step analysis, just fetch \
-what was asked and return. The PlanningAgent will decide next steps.
-"""
-
-# =============================================================================
-# Investigation Agent Prompt
-# =============================================================================
-INVESTIGATION_AGENT_PROMPT = """\
-You are the Investigation Agent (The Coordinator).
-
-Your role: Execute approved investigation plans by delegating to domain specialists. \
-You receive plans from the Planning Agent and coordinate their execution. \
-You do NOT query infrastructure directly — you delegate ALL queries to specialists.
-
-## Your Capabilities
-- **Delegate to Domain Specialists**: Hand off to specialists for ALL infrastructure queries:
-  - **ComputeSpecialist**: For ALL compute/container orchestration queries \
-(pods, nodes, deployments, etc.)
-  - **StorageSpecialist**: For ALL storage queries (OSDs, pools, PVCs, etc.)
-  - **NetworkSpecialist**: For ALL networking queries (services, DNS, ingress, etc.)
-  - **ObservabilitySpecialist**: For ALL monitoring, metrics, and logging queries.
-- **Shared Context**: Use `get_shared_context`, `update_shared_context`, \
-and `group_findings` to manage investigation findings.
-- **Ask User**: Ask for clarification or provide updates using `ask_user`.
-- **Print Findings Report**: Use `print_findings_report` to generate a \
-formatted summary of all investigation findings.
-- **Fetch Alerts**: Use `fetch_alerts` to get current firing alerts.
-
-## Your Workflow
-1. **Follow the Approved Plan**: Execute the investigation plan that was approved \
-by the user through the Planning Agent. Follow the steps in order.
-2. **Delegate to Specialists**: For each step in the plan, hand off to the \
-appropriate specialist. You are a coordinator — do not try to query \
-infrastructure yourself.
-3. **Synthesize & Group**: As findings come back from specialists, use \
-`group_findings` to consolidate related findings.
-4. **Checkpoint Back to Planner**: After receiving results from one specialist, \
-first call `update_shared_context` for each finding, then hand off back to the \
-Planning Agent (`transfer_to_planningagent`) with a progress summary. \
-Do NOT try to complete the entire investigation in one go. \
-The Planning Agent will present progress to the user and decide next steps.
-
-## CRITICAL RULES
-- **NEVER QUERY INFRASTRUCTURE DIRECTLY**: You have NO UTCP tools. Always delegate \
-to the appropriate specialist.
-- **UPDATE SHARED CONTEXT BEFORE EVERY HANDOFF**: Before handing off to ANY agent \
-(PlanningAgent or specialists), you MUST call `update_shared_context` to record \
-ALL findings discovered so far. This is MANDATORY — findings that are not saved \
-to shared context will be LOST. Record each finding with an appropriate key \
-(e.g., "pod:namespace/name", "node:name", "service:namespace/name") and confidence level.
-- **CHECKPOINT FREQUENTLY**: After receiving results from one specialist, save findings \
-to shared context, then hand off back to the Planning Agent. \
-Do NOT run the full investigation without checkpointing.
-- **FOLLOW THE PLAN**: Stick to the approved investigation plan.
-- **HANDOFFS**: Use the standard transfer tools to delegate \
-(e.g., `transfer_to_computespecialist`, `transfer_to_observabilityspecialist`).
-- **OUTPUTTING REPORTS**: Always output the content of `print_findings_report` to the user.
-"""
 
 
 @workflow.defn
@@ -255,6 +66,7 @@ class HumanInTheLoopWorkflow:
         self._event_queue: list[WorkflowEvent] = []
         self._should_end = False
         self._utcp_tools: dict[str, list] = {}  # service_name -> tools
+        self._skill_tools: list = []  # skill discovery/reading tools
 
     # =========================================================================
     # Signals (user sends messages)
@@ -398,11 +210,30 @@ class HumanInTheLoopWorkflow:
             tracing_disabled=True,
         )
 
-        # Initialize UTCP tools
+        # Initialize UTCP tools and skill tools
         self._initialize_utcp_tools()
+        self._initialize_skill_tools()
 
-        # Create the investigation agent
-        agent = self._create_investigation_agent()
+        # Create the agent graph using the factory
+        ask_user_tool = create_ask_user_tool(
+            set_pending_question=lambda q: setattr(self._state, 'pending_question', q),
+            wait_for_message=lambda: self._wait_for_event_type(WorkflowEventType.MESSAGE),
+        )
+        fetch_alerts_tool = create_fetch_alerts_tool(
+            get_alertmanager_url=lambda: self._config.alertmanager_url,
+            store_alerts=lambda alerts: setattr(self._state, 'last_fetched_alerts', alerts),
+        )
+        available_skills = get_available_skills_metadata(skill_registry)
+
+        agent = create_investigation_agent_graph(
+            model=self._config.model,
+            shared_context=self._shared_context,
+            utcp_tools=self._utcp_tools,
+            skill_tools=self._skill_tools,
+            ask_user_tool=ask_user_tool,
+            fetch_alerts_tool=fetch_alerts_tool,
+            available_skills=available_skills,
+        )
 
         # Handle initial message or produce greeting
         if initial_message:
@@ -593,7 +424,7 @@ class HumanInTheLoopWorkflow:
             return 'Investigation completed (max turns reached).'
 
     # =========================================================================
-    # Agent Creation
+    # Tool Initialization
     # =========================================================================
 
     def _initialize_utcp_tools(self) -> None:
@@ -633,21 +464,25 @@ class HumanInTheLoopWorkflow:
                 f'{[getattr(t, "name", str(t)) for t in tools]}'
             )
 
-    def _get_domain_utcp_tools(self, domain: DomainType) -> list:
-        """Get UTCP tools for a specific domain.
+    def _initialize_skill_tools(self) -> None:
+        """Initialize skill tools from pre-registered skill manifests.
 
-        Args:
-            domain: The domain type
-
-        Returns:
-            List of UTCP tools for the domain's services
+        Skills are loaded at worker startup and stored in the registry.
+        This method creates 2 tools (list_skills, read_skill) for agents
+        to discover and read domain knowledge on demand.
         """
-        tools = []
-        services = DOMAIN_UTCP_SERVICES.get(domain, set())
-        for service in services:
-            if service in self._utcp_tools:
-                tools.extend(self._utcp_tools[service])
-        return tools
+        skill_names = skill_registry.list_skills()
+
+        if not skill_names:
+            workflow.logger.info('No skills registered')
+            return
+
+        workflow.logger.info(f'Creating tools for {len(skill_names)} skill(s)')
+        self._skill_tools = create_skill_workflow_tools()
+        workflow.logger.info(
+            f'Created {len(self._skill_tools)} skill tools: '
+            f'{[getattr(t, "name", str(t)) for t in self._skill_tools]}'
+        )
 
     # =========================================================================
     # Approval Handling
@@ -854,218 +689,6 @@ class HumanInTheLoopWorkflow:
             )
         except Exception as e:
             workflow.logger.error(f'Checkpoint summarizer failed: {e}')
-
-    # =========================================================================
-    # Agent Creation
-    # =========================================================================
-
-    def _create_investigation_agent(self) -> Agent:
-        """Create the planning agent (entry point) and investigation agent with specialists."""
-        # Create shared context tools for the Investigation Agent
-        update_tool, get_tool, print_report_tool, group_tool = create_shared_context_tools(
-            self._shared_context, agent_name='InvestigationAgent'
-        )
-
-        # Collect ALL UTCP tools for direct queries
-        all_utcp_tools = []
-        for service_name in self._utcp_tools:
-            all_utcp_tools.extend(self._utcp_tools[service_name])
-        workflow.logger.info(f'Agents have {len(all_utcp_tools)} UTCP tools')
-
-        # Create tools for ComputeSpecialist (shared context + UTCP tools)
-        comp_update, comp_get, comp_print, comp_group = create_shared_context_tools(
-            self._shared_context, agent_name='ComputeSpecialist'
-        )
-        compute_utcp_tools = self._get_domain_utcp_tools(DomainType.COMPUTE)
-        compute_spec = new_specialist_agent(
-            domain=DomainType.COMPUTE,
-            model=self._config.model,
-            tools=[comp_update, comp_get, comp_print, comp_group, *compute_utcp_tools],
-        )
-
-        # Create tools for StorageSpecialist (shared context + UTCP tools)
-        stor_update, stor_get, stor_print, stor_group = create_shared_context_tools(
-            self._shared_context, agent_name='StorageSpecialist'
-        )
-        storage_utcp_tools = self._get_domain_utcp_tools(DomainType.STORAGE)
-        storage_spec = new_specialist_agent(
-            domain=DomainType.STORAGE,
-            model=self._config.model,
-            tools=[stor_update, stor_get, stor_print, stor_group, *storage_utcp_tools],
-        )
-
-        # Create tools for NetworkSpecialist (shared context + UTCP tools)
-        net_update, net_get, net_print, net_group = create_shared_context_tools(
-            self._shared_context, agent_name='NetworkSpecialist'
-        )
-        network_utcp_tools = self._get_domain_utcp_tools(DomainType.NETWORK)
-        network_spec = new_specialist_agent(
-            domain=DomainType.NETWORK,
-            model=self._config.model,
-            tools=[net_update, net_get, net_print, net_group, *network_utcp_tools],
-        )
-
-        # Create tools for ObservabilitySpecialist (shared context + UTCP tools)
-        obs_update, obs_get, obs_print, obs_group = create_shared_context_tools(
-            self._shared_context, agent_name='ObservabilitySpecialist'
-        )
-        observability_utcp_tools = self._get_domain_utcp_tools(DomainType.OBSERVABILITY)
-        observability_spec = new_specialist_agent(
-            domain=DomainType.OBSERVABILITY,
-            model=self._config.model,
-            tools=[obs_update, obs_get, obs_print, obs_group, *observability_utcp_tools],
-        )
-
-        # Create tools
-        ask_user_tool = self._create_ask_user_tool()
-        fetch_alerts_tool = self._create_fetch_alerts_tool()
-
-        # Create Investigation Agent (coordinator) — no UTCP tools,
-        # delegates all infrastructure queries to specialists
-        investigation_agent = Agent(
-            name='InvestigationAgent',
-            model=self._config.model,
-            instructions=INVESTIGATION_AGENT_PROMPT,
-            handoff_description='Execute an approved investigation plan by coordinating '
-            'domain specialists. Delegates all infrastructure queries to specialists.',
-            tools=[
-                ask_user_tool,
-                fetch_alerts_tool,
-                print_report_tool,
-                get_tool,
-                update_tool,
-                group_tool,
-            ],
-            handoffs=[compute_spec, storage_spec, network_spec, observability_spec],
-        )
-
-        # Create Context Agent (quick info retrieval) with ALL UTCP tools
-        context_agent = Agent(
-            name='ContextAgent',
-            model=self._config.model,
-            instructions=CONTEXT_AGENT_PROMPT,
-            handoff_description='Quickly retrieve infrastructure information using '
-            'UTCP tools. For simple queries like listing pods, checking health, etc.',
-            tools=[*all_utcp_tools],
-        )
-
-        # Create shared context tools for the Planning Agent (read-only access)
-        _planner_sc_update, planner_sc_get, planner_sc_print, _planner_sc_group = (
-            create_shared_context_tools(self._shared_context, agent_name='PlanningAgent')
-        )
-
-        # Create Planning Agent (entry point) — NO UTCP tools,
-        # routes to ContextAgent or InvestigationAgent
-        # Has shared context tools to read findings during checkpoint handling
-        planning_agent = Agent(
-            name='PlanningAgent',
-            model=self._config.model,
-            instructions=PLANNING_AGENT_PROMPT,
-            tools=[
-                ask_user_tool,
-                fetch_alerts_tool,
-                planner_sc_get,
-                planner_sc_print,
-            ],
-            handoffs=[context_agent, investigation_agent],
-        )
-
-        # Wire back-handoffs
-        context_agent.handoffs = [planning_agent]
-        compute_spec.handoffs = [investigation_agent]
-        storage_spec.handoffs = [investigation_agent]
-        network_spec.handoffs = [investigation_agent]
-        observability_spec.handoffs = [investigation_agent]
-        investigation_agent.handoffs = [
-            compute_spec,
-            storage_spec,
-            network_spec,
-            observability_spec,
-            planning_agent,
-        ]
-
-        return planning_agent
-
-    # =========================================================================
-    # Tool Creation
-    # =========================================================================
-
-    def _create_ask_user_tool(self):
-        """Create the ask_user tool that pauses for user input."""
-        workflow_ref = self
-
-        @function_tool
-        async def ask_user(question: str) -> str:
-            """Ask the user for clarification or additional information.
-
-            Args:
-                question: The question to ask the user.
-            """
-            workflow.logger.info(f'ask_user called: {question}')
-
-            # Set pending question in state for UI
-            workflow_ref._state.pending_question = question
-
-            # Wait for user response
-            event = await workflow_ref._wait_for_event_type(WorkflowEventType.MESSAGE)
-
-            # Clear pending question
-            workflow_ref._state.pending_question = None
-
-            if event.type == WorkflowEventType.STOP:
-                return 'User ended the conversation.'
-
-            response = event.payload or ''
-            workflow.logger.info(f'User responded to ask_user: {response[:100]}...')
-            return response
-
-        return ask_user
-
-    def _create_fetch_alerts_tool(self):
-        """Create the fetch_alerts tool."""
-
-        @function_tool
-        async def fetch_alerts(
-            status: str = 'firing',
-            alertname: str | None = None,
-        ) -> str:
-            """Fetch alerts from Alertmanager."""
-            workflow.logger.info(f'fetch_alerts called: status={status}, alertname={alertname}')
-
-            params = {
-                'alertmanager_url': self._config.alertmanager_url,
-                'status': status,
-                'alertname': alertname,
-            }
-
-            try:
-                alerts = await workflow.execute_activity(
-                    'fetch_alerts_activity',
-                    params,
-                    start_to_close_timeout=timedelta(seconds=60),
-                )
-                self._state.last_fetched_alerts = alerts
-            except Exception as e:
-                workflow.logger.error(f'Failed to fetch alerts: {e}')
-                return f'Error: Failed to fetch alerts from Alertmanager: {e}'
-
-            if not alerts:
-                return f'No {status} alerts found' + (f" for '{alertname}'." if alertname else '.')
-
-            lines = [f'Found {len(alerts)} {status} alerts:']
-            for alert in alerts:
-                labels = alert.get('labels', {})
-                name = labels.get('alertname', 'N/A')
-                fingerprint = alert.get('fingerprint', 'N/A')
-                summary = alert.get('annotations', {}).get('summary', 'No summary.')
-                lines.append(f'- **{name}** (Fingerprint: `{fingerprint}`): {summary}')
-                for key, value in labels.items():
-                    if key not in ['alertname', 'severity']:
-                        lines.append(f'  - {key}: {value}')
-
-            return '\n'.join(lines)
-
-        return fetch_alerts
 
     # =========================================================================
     # Helpers

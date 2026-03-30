@@ -1,5 +1,6 @@
 """Data models for investigation."""
 
+from .domain import DomainType, SkillInfo
 from .hitl import (
     AgentSelectionRequest,
     ApprovalDecision,
@@ -19,9 +20,11 @@ __all__ = [
     'ApprovalDecision',
     'ApprovalPolicy',
     'ChatMessage',
+    'DomainType',
     'HITLConfig',
     'SharedContext',
     'SharedFinding',
+    'SkillInfo',
     'WorkflowEvent',
     'WorkflowEventType',
     'WorkflowInterruption',

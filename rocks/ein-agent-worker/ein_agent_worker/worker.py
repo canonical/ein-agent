@@ -15,6 +15,9 @@ from ein_agent_worker.activities.worker_config import load_utcp_config, load_wor
 from ein_agent_worker.http import HttpxConfigManager
 from ein_agent_worker.models.gemini_litellm_provider import GeminiCompatibleLitellmProvider
 from ein_agent_worker.models.hitl import DEFAULT_MODEL
+from ein_agent_worker.skills import registry as skill_registry
+from ein_agent_worker.skills.config import SkillsConfig
+from ein_agent_worker.skills.temporal_skills import get_skill_activities
 from ein_agent_worker.utcp import registry as utcp_registry
 from ein_agent_worker.utcp.config import UTCPConfig
 from ein_agent_worker.utcp.loader import ToolLoader
@@ -61,6 +64,24 @@ async def initialize_utcp_clients() -> None:
             )
 
 
+def initialize_skills() -> None:
+    """Initialize skills at worker startup.
+
+    Scans the skills directory for skill manifests and registers them
+    in the global registry. This runs outside the Temporal workflow sandbox.
+    """
+    config = SkillsConfig.from_env()
+
+    if not config.skills:
+        logger.info('No skills found')
+        return
+
+    logger.info('Initializing %d skill(s)', len(config.skills))
+
+    for manifest in config.skills:
+        skill_registry.register_skill(manifest.name, manifest)
+
+
 async def main():
     """Start the Temporal worker."""
     # Get config from environment (injected by temporal-worker-k8s-operator)
@@ -77,6 +98,9 @@ async def main():
     # Initialize UTCP clients at startup (before workflows run)
     # This allows network I/O outside the Temporal sandbox
     await initialize_utcp_clients()
+
+    # Initialize skills at startup (filesystem reads only)
+    initialize_skills()
 
     # Create Temporal client
     client = await Client.connect(
@@ -111,6 +135,7 @@ async def main():
             load_utcp_config,
             fetch_alerts_activity,
             *get_utcp_activities(),
+            *get_skill_activities(),
         ],
     )
 
