@@ -21,6 +21,7 @@ from temporalio.workflow import ActivityConfig
 from ein_agent_worker.utcp import registry as utcp_registry
 from ein_agent_worker.utcp.approval import create_approval_checker
 from ein_agent_worker.utcp.config import UTCPServiceConfig
+from ein_agent_worker.utcp.serializers import serialize_result, serialize_schema
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +186,7 @@ def get_utcp_activities() -> Sequence[Callable]:
 
             for tool in tools:
                 if tool.name == args.tool_name:
-                    schema = _serialize_schema(tool.inputs) if hasattr(tool, 'inputs') else {}
+                    schema = serialize_schema(tool.inputs) if hasattr(tool, 'inputs') else {}
 
                     response = {
                         'name': tool.name,
@@ -213,7 +214,9 @@ def get_utcp_activities() -> Sequence[Callable]:
 
         try:
             # Validate tool name belongs to this service
-            expected_prefix = f'{args.service_name}.'
+            # UTCP normalizes hyphens to underscores in manual/tool names
+            normalized_name = args.service_name.replace('-', '_')
+            expected_prefix = f'{normalized_name}.'
             if not args.tool_name.startswith(expected_prefix):
                 tool_service = args.tool_name.split('.')[0]
                 error_msg = (
@@ -234,7 +237,7 @@ def get_utcp_activities() -> Sequence[Callable]:
             )
             arguments = json.loads(args.arguments) if args.arguments else {}
             result = await client.call_tool(args.tool_name, arguments)
-            return _serialize_result(result)
+            return serialize_result(result)
         except json.JSONDecodeError as e:
             return json.dumps({'error': f'Invalid JSON arguments: {e}'})
         except Exception as e:
@@ -264,14 +267,45 @@ def create_utcp_workflow_tools(
     config: ActivityConfig | None = None,
     sticky_approvals: dict[str, bool] | None = None,
 ) -> list[Callable]:
-    """Create UTCP tools for use in Temporal workflows.
+    """Create UTCP tools for use in Temporal workflows (single instance).
 
     These tools execute UTCP operations as activities, allowing network I/O
     to happen outside the workflow sandbox.
 
     Args:
-        service_name: UTCP service name (e.g., 'kubernetes')
+        service_name: UTCP service instance name (e.g., 'kubernetes')
         service_config: Optional UTCP service configuration (for approval policy)
+        config: Optional activity configuration
+        sticky_approvals: Optional shared sticky approvals dict
+
+    Returns:
+        List of function tools for the agent
+    """
+    svc_type = service_config.resolved_type if service_config else service_name
+    return create_grouped_utcp_workflow_tools(
+        service_type=svc_type,
+        instances={service_name: service_config},
+        config=config,
+        sticky_approvals=sticky_approvals,
+    )
+
+
+def create_grouped_utcp_workflow_tools(
+    service_type: str,
+    instances: dict[str, UTCPServiceConfig | None],
+    config: ActivityConfig | None = None,
+    sticky_approvals: dict[str, bool] | None = None,
+) -> list[Callable]:
+    """Create UTCP tools for a group of instances of the same service type.
+
+    Shared read tools (search/list/get_details) are created once per service
+    type using the first instance's client. Per-instance call tools are created
+    for each instance to route to the correct endpoint.
+
+    Args:
+        service_type: Service type (e.g., 'kubernetes')
+        instances: Dict of instance_name -> UTCPServiceConfig for all instances
+            of this type
         config: Optional activity configuration
         sticky_approvals: Optional shared sticky approvals dict
 
@@ -280,19 +314,12 @@ def create_utcp_workflow_tools(
     """
     activity_config = config or ActivityConfig(start_to_close_timeout=timedelta(seconds=60))
 
-    # Create approval checker if service_config is provided
-    approval_checker = None
-    if service_config:
-        approval_checker = create_approval_checker(
-            service_config, sticky_approvals=sticky_approvals
-        )
-        logger.info(
-            '[%s] Approval policy: %s',
-            service_name,
-            service_config.approval_policy,
-        )
+    # Use the first instance for shared read tools (operations are identical)
+    first_instance = next(iter(instances))
 
-    @function_tool(name_override=f'list_{service_name}_operations')
+    # --- Shared read tools (named after service type) ---
+
+    @function_tool(name_override=f'list_{service_type}_operations')
     async def list_operations(tag: str = '') -> str:
         """List all available API operations with optional tag filtering.
 
@@ -309,12 +336,12 @@ def create_utcp_workflow_tools(
         """
         return await workflow.execute_activity(
             'utcp-list-operations',
-            _ListOperationsArguments(service_name, tag),
+            _ListOperationsArguments(first_instance, tag),
             result_type=str,
             **activity_config,
         )
 
-    @function_tool(name_override=f'search_{service_name}_operations')
+    @function_tool(name_override=f'search_{service_type}_operations')
     async def search_operations(query: str, limit: int = 20) -> str:
         """Search for API operations matching the query.
 
@@ -328,12 +355,12 @@ def create_utcp_workflow_tools(
         """
         return await workflow.execute_activity(
             'utcp-search-operations',
-            _SearchOperationsArguments(service_name, query, limit),
+            _SearchOperationsArguments(first_instance, query, limit),
             result_type=str,
             **activity_config,
         )
 
-    @function_tool(name_override=f'get_{service_name}_operation_details')
+    @function_tool(name_override=f'get_{service_type}_operation_details')
     async def get_operation_details(tool_name: str) -> str:
         """Get detailed parameter schema for a specific operation.
 
@@ -349,19 +376,71 @@ def create_utcp_workflow_tools(
         """
         return await workflow.execute_activity(
             'utcp-get-operation-details',
-            _GetOperationDetailsArguments(service_name, tool_name),
+            _GetOperationDetailsArguments(first_instance, tool_name),
             result_type=str,
             **activity_config,
         )
 
+    tools: list[Callable] = [list_operations, search_operations, get_operation_details]
+
+    # --- Per-instance call tools ---
+
+    for instance_name, service_config in instances.items():
+        call_prefix = instance_name.replace('-', '_')
+
+        # Create approval checker per instance
+        approval_checker = None
+        if service_config:
+            approval_checker = create_approval_checker(
+                service_config, sticky_approvals=sticky_approvals
+            )
+            logger.info(
+                '[%s] Approval policy: %s',
+                instance_name,
+                service_config.approval_policy,
+            )
+
+        # Each instance gets its own call tool bound to its endpoint
+        call_tool = _create_call_tool(
+            instance_name=instance_name,
+            call_prefix=call_prefix,
+            activity_config=activity_config,
+            approval_checker=approval_checker,
+        )
+        tools.append(call_tool)
+
+    return tools
+
+
+def _create_call_tool(
+    instance_name: str,
+    call_prefix: str,
+    activity_config: ActivityConfig,
+    approval_checker: Any | None = None,
+) -> Callable:
+    """Create a per-instance call_operation tool.
+
+    Separated into its own function so each closure captures
+    the correct instance_name and call_prefix.
+
+    Args:
+        instance_name: UTCP instance name (e.g., 'kubernetes-prod')
+        call_prefix: Sanitized name for tool naming (e.g., 'kubernetes_prod')
+        activity_config: Temporal activity configuration
+        approval_checker: Optional approval checker for this instance
+
+    Returns:
+        A function tool for calling operations on this instance
+    """
+
     @function_tool(
-        name_override=f'call_{service_name}_operation',
+        name_override=f'call_{call_prefix}_operation',
         needs_approval=approval_checker if approval_checker else False,
     )
     async def call_operation(tool_name: str, arguments: str = '{}') -> str:
         """Execute an API operation.
 
-        IMPORTANT: This tool is ONLY for operations of this service.
+        IMPORTANT: This tool is ONLY for operations of this service instance.
         Tool names must start with the service prefix.
         If you need to call operations from other services,
         use their respective call_*_operation tools.
@@ -376,33 +455,9 @@ def create_utcp_workflow_tools(
         """
         return await workflow.execute_activity(
             'utcp-call-operation',
-            _CallOperationArguments(service_name, tool_name, arguments),
+            _CallOperationArguments(instance_name, tool_name, arguments),
             result_type=str,
             **activity_config,
         )
 
-    return [list_operations, search_operations, get_operation_details, call_operation]
-
-
-# =============================================================================
-# Helpers
-# =============================================================================
-
-
-def _serialize_result(result: Any) -> str:
-    """Serialize a result to JSON string."""
-    if isinstance(result, (dict, list)):
-        return json.dumps(result, indent=2)
-    return str(result)
-
-
-def _serialize_schema(obj: Any) -> dict:
-    """Recursively serialize JsonSchema objects to dicts."""
-    if hasattr(obj, 'model_dump'):
-        data = obj.model_dump()
-        return _serialize_schema(data)
-    elif isinstance(obj, dict):
-        return {k: _serialize_schema(v) for k, v in obj.items() if v is not None}
-    elif isinstance(obj, list):
-        return [_serialize_schema(item) for item in obj]
-    return obj
+    return call_operation

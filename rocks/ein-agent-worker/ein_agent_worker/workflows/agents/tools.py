@@ -7,11 +7,12 @@ keeping the agents package decoupled from the specific workflow class.
 
 from collections.abc import Awaitable, Callable
 from datetime import timedelta
+from uuid import uuid4
 
 from agents import function_tool
 from temporalio import workflow
 
-from ein_agent_worker.models.hitl import WorkflowEventType
+from ein_agent_worker.models.hitl import WorkflowEventType, WorkflowInterruption
 
 
 def create_ask_user_tool(
@@ -54,6 +55,71 @@ def create_ask_user_tool(
         return response
 
     return ask_user
+
+
+def create_ask_selection_tool(
+    add_interruption: Callable[[WorkflowInterruption], None],
+    clear_interruptions: Callable[[], None],
+    wait_for_selection_response: Callable[[], Awaitable],
+):
+    """Create the ask_selection tool that presents options to the user.
+
+    Args:
+        add_interruption: Callback to add a WorkflowInterruption to state.
+        clear_interruptions: Callback to clear interruptions from state.
+        wait_for_selection_response: Async callback that waits for a
+            SELECTION_RESPONSE event and returns a WorkflowEvent.
+    """
+
+    @function_tool
+    async def ask_selection(prompt: str, options: list[str]) -> str:
+        """Present a list of options to the user and return their selection.
+
+        Use this when you want the user to choose from a specific set of options
+        rather than typing a free-form response. The user can also reject all
+        options and provide a free-text instruction instead.
+
+        Args:
+            prompt: The question or instruction to display above the options.
+            options: List of option strings for the user to choose from.
+        """
+        workflow.logger.info(f'ask_selection called: {prompt} ({len(options)} options)')
+
+        interruption = WorkflowInterruption(
+            id=f'selection:{uuid4().hex[:8]}',
+            type='user_selection',
+            agent_name='Agent',
+            question=prompt,
+            options=options,
+            timestamp=workflow.now(),
+        )
+        add_interruption(interruption)
+
+        # Wait for user selection
+        event = await wait_for_selection_response()
+
+        # Clear interruptions
+        clear_interruptions()
+
+        if event.type == WorkflowEventType.STOP:
+            return 'User ended the conversation.'
+
+        selected = event.payload
+        if selected is None:
+            workflow.logger.info('User cancelled the selection')
+            return 'User cancelled the selection.'
+
+        # Check if user rejected all options and provided custom instruction
+        user_instruction_prefix = '[USER_INSTRUCTION] '
+        if isinstance(selected, str) and selected.startswith(user_instruction_prefix):
+            instruction = selected[len(user_instruction_prefix) :]
+            workflow.logger.info(f'User rejected options, instruction: {instruction}')
+            return f'User rejected all proposed options. User instruction: {instruction}'
+
+        workflow.logger.info(f'User selected: {selected}')
+        return selected
+
+    return ask_selection
 
 
 def create_fetch_alerts_tool(

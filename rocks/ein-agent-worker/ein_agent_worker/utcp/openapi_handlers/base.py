@@ -14,6 +14,19 @@ from utcp.data.variable_loader import VariableLoader
 logger = logging.getLogger(__name__)
 
 
+def utcp_namespace_prefix(namespace: str) -> str:
+    """Compute UTCP's namespaced variable prefix.
+
+    Replicates the transformation in DefaultVariableSubstitutor._get_variable:
+        key = namespace.replace("_", "!").replace("!", "__") + "_" + key
+
+    Examples:
+        "kubernetes"       -> "kubernetes"
+        "kubernetes_first" -> "kubernetes__first"
+    """
+    return namespace.replace('_', '!').replace('!', '__')
+
+
 class BearerTokenLoader(VariableLoader):
     """Generic variable loader that provides bearer tokens for API key variables.
 
@@ -97,11 +110,13 @@ class OpenApiHandler(ABC):
         return spec_data
 
     @abstractmethod
-    def get_variable_loader(self, token: str) -> VariableLoader | None:
+    def get_variable_loader(self, token: str, instance_name: str = '') -> VariableLoader | None:
         """Create a variable loader for bearer token authentication.
 
         Args:
             token: The bearer token to use for authentication.
+            instance_name: The underscore-normalized instance name (e.g., 'kubernetes_first').
+                Used to compute the correct UTCP namespace prefix for variable matching.
 
         Returns:
             A VariableLoader instance, or None if no loader is needed.

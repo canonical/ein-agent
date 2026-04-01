@@ -39,6 +39,10 @@ _protocol_registered = False
 # Maps service_name -> actual API endpoint URL
 _api_base_urls: dict[str, str] = {}
 
+# Registry for service types (instance_name -> service_type)
+# Used for handler lookup when instance name differs from service type
+_service_types: dict[str, str] = {}
+
 
 def set_api_base_url(service_name: str, url: str) -> None:
     """Register the API base URL for a service.
@@ -64,6 +68,32 @@ def get_api_base_url(service_name: str) -> str | None:
         The API base URL if registered, None otherwise
     """
     return _api_base_urls.get(service_name)
+
+
+def set_service_type(service_name: str, service_type: str) -> None:
+    """Register the service type for an instance name.
+
+    Used for OpenAPI handler lookup when instance name differs from type
+    (e.g., 'kubernetes-prod' -> 'kubernetes').
+
+    Args:
+        service_name: The instance name (e.g., 'kubernetes-prod')
+        service_type: The service type (e.g., 'kubernetes')
+    """
+    _service_types[service_name] = service_type
+    logger.debug('Registered service type for %s: %s', service_name, service_type)
+
+
+def get_service_type(service_name: str) -> str:
+    """Get the registered service type for an instance name.
+
+    Args:
+        service_name: The instance name
+
+    Returns:
+        The service type if registered, otherwise the service_name itself
+    """
+    return _service_types.get(service_name, service_name)
 
 
 class LocalFileHttpProtocol(HttpCommunicationProtocol):
@@ -158,8 +188,11 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
                 api_base_url = get_api_base_url(service_name)
 
                 # Apply service-specific preprocessing via handler
+                # Look up handler by service type first, then instance name
+                svc_type = get_service_type(service_name)
                 handler = self.openapi_handlers.get(
-                    service_name, DefaultOpenApiHandler(service_name)
+                    svc_type,
+                    self.openapi_handlers.get(service_name, DefaultOpenApiHandler(service_name)),
                 )
                 spec_data = handler.preprocess_spec(spec_data, service_name)
 
@@ -293,7 +326,12 @@ class LocalFileHttpProtocol(HttpCommunicationProtocol):
                     spec_data = response.json()
 
             # Apply service-specific preprocessing via handler
-            handler = self.openapi_handlers.get(service_name, DefaultOpenApiHandler(service_name))
+            # Look up handler by service type first, then instance name
+            svc_type = get_service_type(service_name)
+            handler = self.openapi_handlers.get(
+                svc_type,
+                self.openapi_handlers.get(service_name, DefaultOpenApiHandler(service_name)),
+            )
             spec_data = handler.preprocess_spec(spec_data, service_name)
 
             # Convert OpenAPI spec to UTCP manual

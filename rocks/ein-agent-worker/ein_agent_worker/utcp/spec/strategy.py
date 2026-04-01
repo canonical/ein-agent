@@ -33,14 +33,17 @@ class SpecSourceStrategy(ABC):
         openapi_url: str,
         version: str,
         specs_dir: Path,
+        service_type: str = '',
     ) -> SpecSource:
         """Resolve the spec source and API base URL.
 
         Args:
-            service_name: Service name (e.g., 'kubernetes', 'grafana').
+            service_name: Service instance name (e.g., 'kubernetes-prod').
             openapi_url: The configured OpenAPI spec URL.
             version: Version string for local spec file lookup.
             specs_dir: Directory containing local spec files.
+            service_type: Service type for spec lookup (e.g., 'kubernetes').
+                If empty, falls back to service_name.
 
         Returns:
             SpecSource with the resolved URL and API base URL.
@@ -56,15 +59,19 @@ class LocalFileStrategy(SpecSourceStrategy):
         openapi_url: str,
         version: str,
         specs_dir: Path,
+        service_type: str = '',
     ) -> SpecSource:
         """Resolve spec source from local file only."""
         api_base_url = strip_openapi_suffix(openapi_url)
 
-        local_spec_path = find_spec_file(specs_dir, service_name, version)
+        local_spec_path = find_spec_file(
+            specs_dir, service_name, version, service_type=service_type
+        )
+        lookup_name = service_type if service_type else service_name
         if not local_spec_path or not local_spec_path.exists():
             raise FileNotFoundError(
                 f"Local spec file not found for service '{service_name}' "
-                f'in {specs_dir / service_name}'
+                f'(type={lookup_name}) in {specs_dir / lookup_name}'
             )
 
         logger.info(
@@ -93,6 +100,7 @@ class LiveURLStrategy(SpecSourceStrategy):
         openapi_url: str,
         version: str,
         specs_dir: Path,
+        service_type: str = '',
     ) -> SpecSource:
         """Resolve spec source from live URL only."""
         api_base_url = strip_openapi_suffix(openapi_url)

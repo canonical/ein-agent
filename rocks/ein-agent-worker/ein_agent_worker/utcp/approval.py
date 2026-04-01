@@ -5,15 +5,9 @@ import re
 from typing import Any
 
 from ein_agent_worker.models import ApprovalPolicy
+from ein_agent_worker.utcp.config import READ_HTTP_METHODS, WRITE_HTTP_METHODS
 
 logger = logging.getLogger(__name__)
-
-
-# HTTP methods that are considered "write" operations
-WRITE_HTTP_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE', 'CREATE', 'UPDATE'}
-
-# HTTP methods that are considered "read" operations
-READ_HTTP_METHODS = {'GET', 'LIST', 'WATCH', 'READ'}
 
 
 def extract_http_method_from_operation(tool_name: str) -> str | None:
@@ -56,7 +50,7 @@ def check_needs_approval(
     """Check if a UTCP tool call requires approval based on policy.
 
     Args:
-        approval_policy: The approval policy string (never, always, write_operations, read_only)
+        approval_policy: The approval policy string (never, always, read_only)
         tool_name: The UTCP tool name (e.g., "kubernetes.listCoreV1NamespacedPod")
         arguments: Optional tool arguments
 
@@ -68,10 +62,10 @@ def check_needs_approval(
         policy = ApprovalPolicy(approval_policy)
     except ValueError:
         logger.warning(
-            "Invalid approval policy '%s', defaulting to write_operations",
+            "Invalid approval policy '%s', defaulting to read_only",
             approval_policy,
         )
-        policy = ApprovalPolicy.WRITE_OPERATIONS
+        policy = ApprovalPolicy.READ_ONLY
 
     # Never require approval
     if policy == ApprovalPolicy.NEVER:
@@ -92,13 +86,9 @@ def check_needs_approval(
         )
         return True
 
-    # Write operations policy: require approval for writes
-    if policy == ApprovalPolicy.WRITE_OPERATIONS:
-        return http_method in WRITE_HTTP_METHODS
-
-    # Read only policy: require approval for reads
+    # Read only policy: auto-approve reads, require approval for writes
     if policy == ApprovalPolicy.READ_ONLY:
-        return http_method in READ_HTTP_METHODS
+        return http_method in WRITE_HTTP_METHODS
 
     # Default: require approval
     return True

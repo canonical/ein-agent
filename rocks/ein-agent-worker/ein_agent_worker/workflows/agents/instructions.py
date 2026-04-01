@@ -12,7 +12,7 @@ from string import Template
 from ein_agent_worker.models.domain import DomainType, SkillInfo
 from ein_agent_worker.workflows.agents.specialists import (
     DOMAIN_NAMES,
-    DOMAIN_UTCP_SERVICES,
+    DOMAIN_UTCP_SERVICE_TYPES,
     build_services_section,
     build_skills_section,
 )
@@ -60,8 +60,8 @@ multi-step investigation, you MUST:
    - Which specialists will be consulted (Compute, Storage, Network, Observability)
    - What specific checks will be performed
    - The order of investigation steps
-3. **Present the Plan**: Use `ask_user` to present the plan and ask for approval.
-   Format the plan clearly:
+3. **Present the Plan**: First present the plan details using a message, then \
+use `ask_selection` to let the user choose how to proceed. Format the plan clearly:
    ```
    Investigation Plan:
    1. [Step 1 - what will be checked and why]
@@ -70,13 +70,17 @@ multi-step investigation, you MUST:
 
    Specialists to involve: [list]
    Estimated scope: [brief description]
-
-   Shall I proceed with this plan? (yes/no, or suggest changes)
    ```
+   Then call `ask_selection` with prompt "How would you like to proceed?" and options:
+   - "Approve and start investigation"
+   - "Cancel"
+   The user can also reject all options and provide custom instructions to revise the plan.
 4. **Wait for Approval**:
-   - If user approves -> Hand off to InvestigationAgent with the approved plan
-   - If user suggests changes -> Revise the plan and ask again
-   - If user says no -> Ask what they'd like instead
+   - If user selects "Approve and start investigation" -> Hand off to InvestigationAgent \
+with the approved plan
+   - If user selects "Cancel" -> Ask what they'd like instead
+   - If user provides custom instructions -> Revise the plan based on their \
+feedback and present again
 
 Examples of troubleshooting requests that REQUIRE a plan:
 - "why are my pods crashing?" -> Plan needed
@@ -91,36 +95,39 @@ When the InvestigationAgent hands back to you with a progress update:
 1. **Read Shared Context**: Call `get_shared_context()` to retrieve all findings \
 recorded by specialists during the investigation.
 2. **Summarize Progress**: Compact the findings so far into a clear summary.
-3. **Present to User**: Use `ask_user` to show:
+3. **Present to User**: First present the progress summary as a message:
    ```
    Investigation Progress:
    - Completed: [steps done so far]
    - Findings: [key findings from shared context]
    - Remaining: [steps still to do from the original plan]
-
-   Would you like to:
-   1. Continue with the remaining steps
-   2. Adjust the plan based on findings
-   3. Stop here — the current findings are sufficient
    ```
+   Then call `ask_selection` with prompt "How would you like to proceed?" and options:
+   - "Continue with the remaining steps"
+   - "Stop here — the current findings are sufficient"
+   The user can also reject all options and provide custom instructions (e.g., to \
+adjust the plan).
 4. **Act on User Decision**:
-   - Continue -> Hand off back to InvestigationAgent with remaining steps
-   - Adjust -> Create a revised plan and ask for approval
-   - Stop -> Call `print_findings_report` to generate and present the full \
+   - "Continue with the remaining steps" -> Hand off back to InvestigationAgent \
+with remaining steps
+   - "Stop here" -> Call `print_findings_report` to generate and present the full \
 findings report to the user
+   - Custom instruction -> Revise the plan based on user feedback and present again
 
 ## CRITICAL RULES
 - **YOU HAVE NO UTCP TOOLS**: Never try to query infrastructure directly. \
 Hand off to ContextAgent for simple queries or InvestigationAgent for investigations.
 - **NEVER HAND OFF TO InvestigationAgent WITHOUT USER APPROVAL**: You MUST \
-call `ask_user` with a plan FIRST. Wait for the user to say "yes" or "approve" \
-before calling `transfer_to_investigationagent`. This is NON-NEGOTIABLE — even \
-if the issue seems obvious, even if you already have alert data, you MUST \
-present a plan and get explicit approval before handing off.
+present a plan and use `ask_selection` to get approval FIRST. Wait for the user \
+to select "Approve and start investigation" before calling \
+`transfer_to_investigationagent`. This is NON-NEGOTIABLE — even if the issue \
+seems obvious, even if you already have alert data, you MUST present a plan and \
+get explicit approval before handing off.
 - **HAND OFF IMMEDIATELY AFTER APPROVAL**: When the user approves a plan, \
 immediately call `transfer_to_investigationagent`. Do NOT do anything else.
-- **ALWAYS USE ask_user FOR PLANS**: Present investigation plans through `ask_user` \
-to get explicit approval before handing off.
+- **USE ask_selection FOR DECISIONS**: Use `ask_selection` whenever you need the \
+user to choose between options (plan approval, checkpoint decisions). Use \
+`ask_user` only when you need free-form text input (clarification questions).
 - **COMPACT FINDINGS**: When presenting progress updates, summarize and compact \
 the findings — don't dump raw tool output.
 """)
@@ -219,11 +226,19 @@ Do NOT run the full investigation without checkpointing.
 def _build_environment_section(
     utcp_services: list[str],
     available_skills: list[SkillInfo],
+    instance_names: dict[str, list[str]] | None = None,
 ) -> str:
     """Build environment context for the planning agent."""
     lines = ['## Environment']
     if utcp_services:
         lines.append(f'Configured infrastructure services: {", ".join(sorted(utcp_services))}')
+        # Show instance details for multi-instance service types
+        if instance_names:
+            for svc_type in sorted(utcp_services):
+                instances = instance_names.get(svc_type, [])
+                if len(instances) > 1:
+                    inst_list = ', '.join(f'`{i}`' for i in sorted(instances))
+                    lines.append(f'  - `{svc_type}` instances: {inst_list}')
     else:
         lines.append('No infrastructure services are currently configured.')
     if available_skills:
@@ -238,7 +253,7 @@ def _build_environment_section(
     # Show specialist capabilities
     lines.append('\n## Specialist Capabilities')
     for domain in DomainType:
-        domain_services = DOMAIN_UTCP_SERVICES.get(domain, set())
+        domain_services = DOMAIN_UTCP_SERVICE_TYPES.get(domain, set())
         active = [s for s in sorted(domain_services) if s in utcp_services]
         status = f'tools for {", ".join(active)}' if active else 'no UTCP services configured'
         lines.append(f'- **{DOMAIN_NAMES[domain]}**: {status}')
@@ -248,6 +263,7 @@ def _build_environment_section(
 
 def _build_specialists_status_section(
     utcp_services: list[str],
+    instance_names: dict[str, list[str]] | None = None,
 ) -> str:
     """Build specialist status section for the investigation agent."""
     descriptions = {
@@ -258,12 +274,19 @@ def _build_specialists_status_section(
     }
     lines = []
     for domain in DomainType:
-        domain_services = DOMAIN_UTCP_SERVICES.get(domain, set())
+        domain_services = DOMAIN_UTCP_SERVICE_TYPES.get(domain, set())
         active = [s for s in sorted(domain_services) if s in utcp_services]
         name = DOMAIN_NAMES[domain]
         desc = descriptions.get(domain, '')
         if active:
-            lines.append(f'  - **{name}**: {desc} (tools: {", ".join(active)})')
+            details = f'{desc} (tools: {", ".join(active)})'
+            # Show instances if multi-instance
+            for svc_type in active:
+                instances = (instance_names or {}).get(svc_type, [])
+                if len(instances) > 1:
+                    inst_list = ', '.join(f'`{i}`' for i in sorted(instances))
+                    details += f'\n    - `{svc_type}` instances: {inst_list}'
+            lines.append(f'  - **{name}**: {details}')
         else:
             lines.append(f'  - **{name}**: {desc} (no UTCP services configured)')
     return '\n'.join(lines)
@@ -277,28 +300,37 @@ def _build_specialists_status_section(
 def format_planning_instructions(
     utcp_services: list[str],
     available_skills: list[SkillInfo],
+    instance_names: dict[str, list[str]] | None = None,
 ) -> str:
     """Format planning agent instructions with environment context."""
     return _PLANNING_AGENT_TEMPLATE.substitute(
-        environment_section=_build_environment_section(utcp_services, available_skills),
+        environment_section=_build_environment_section(
+            utcp_services, available_skills, instance_names=instance_names
+        ),
     )
 
 
 def format_context_instructions(
     available_services: list[str],
     available_skills: list[SkillInfo],
+    instance_names: dict[str, list[str]] | None = None,
 ) -> str:
     """Format context agent instructions with available services and skills."""
     return _CONTEXT_AGENT_TEMPLATE.substitute(
-        available_services_section=build_services_section(available_services),
+        available_services_section=build_services_section(
+            available_services, instance_names=instance_names
+        ),
         available_skills_section=build_skills_section(available_skills, domain=''),
     )
 
 
 def format_investigation_instructions(
     utcp_services: list[str],
+    instance_names: dict[str, list[str]] | None = None,
 ) -> str:
     """Format investigation agent instructions with specialist status."""
     return _INVESTIGATION_AGENT_TEMPLATE.substitute(
-        specialists_status_section=_build_specialists_status_section(utcp_services),
+        specialists_status_section=_build_specialists_status_section(
+            utcp_services, instance_names=instance_names
+        ),
     )

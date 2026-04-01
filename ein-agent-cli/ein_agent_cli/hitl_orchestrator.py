@@ -2,6 +2,7 @@
 
 import asyncio
 import functools
+import readline  # noqa: F401
 from datetime import datetime
 from typing import Any
 
@@ -152,6 +153,15 @@ class HITLOrchestrator:
         await self.handle.signal('provide_agent_selection', selected_agent)
 
     @handle_rpc_error()
+    async def provide_selection_response(self, response: dict) -> None:
+        """Send selection response for a pending user_selection interruption.
+
+        Args:
+            response: SelectionResponse dict (interruption_id, selected_option)
+        """
+        await self.handle.signal('provide_selection_response', response)
+
+    @handle_rpc_error()
     async def provide_approval_decisions(self, decisions: list[dict]) -> None:
         """Send approval decisions for pending tool calls.
 
@@ -260,6 +270,67 @@ class HITLOrchestrator:
                     return selected
                 else:
                     console.print_error(f'Invalid choice. Please enter 0-{len(available)}.')
+            except ValueError:
+                console.print_error('Please enter a number.')
+
+    async def _handle_selection_interruption(self, interruption: dict[str, Any]) -> dict:
+        """Handle a user_selection interruption UI.
+
+        Displays a numbered list of options for the user to choose from.
+        Includes a "None of the above" option that prompts for free-text instruction.
+
+        Args:
+            interruption: WorkflowInterruption dict with type='user_selection'
+
+        Returns:
+            SelectionResponse dict with interruption_id and selected_option
+        """
+        interruption_id = interruption['id']
+        prompt = interruption.get('question', 'Please select an option:')
+        options = interruption.get('options', [])
+
+        none_idx = len(options) + 1
+        lines = [prompt, '']
+        for i, option in enumerate(options, start=1):
+            lines.append(f'  [{i}] {option}')
+        lines.append(f'  [{none_idx}] None of the above')
+        lines.append('')
+
+        console.print_panel(
+            '\n'.join(lines),
+            title='[yellow]Selection Required[/yellow]',
+            border_style='yellow',
+        )
+
+        while True:
+            user_input = input('Select option: ').strip()
+
+            if not user_input:
+                continue
+
+            try:
+                choice = int(user_input)
+                if choice == none_idx:
+                    # Ask for free-text instruction
+                    console.print_dim('What should the agent do instead?')
+                    instruction = input('Your instruction: ').strip()
+                    if not instruction:
+                        console.print_warning('No instruction provided, please try again.')
+                        continue
+                    console.print_info(f'Instruction: {instruction}')
+                    return {
+                        'interruption_id': interruption_id,
+                        'selected_option': f'[USER_INSTRUCTION] {instruction}',
+                    }
+                if 1 <= choice <= len(options):
+                    selected = options[choice - 1]
+                    console.print_info(f'Selected: {selected}')
+                    return {
+                        'interruption_id': interruption_id,
+                        'selected_option': selected,
+                    }
+                else:
+                    console.print_error(f'Invalid choice. Please enter 1-{none_idx}.')
             except ValueError:
                 console.print_error('Please enter a number.')
 
@@ -544,10 +615,18 @@ class HITLOrchestrator:
                         state = await self.get_state()
                         interruptions = state.get('interruptions', [])
                         if interruptions:
-                            # Handle all interruptions and collect decisions
-                            decisions = await self._handle_approval_interruptions(interruptions)
-                            # Send decisions to workflow
-                            await self.provide_approval_decisions(decisions)
+                            # Dispatch based on interruption type
+                            first_type = interruptions[0].get('type', 'tool_approval')
+                            if first_type == 'user_selection':
+                                # Handle selection (only one at a time)
+                                resp = await self._handle_selection_interruption(interruptions[0])
+                                await self.provide_selection_response(resp)
+                            else:
+                                # Handle tool approvals
+                                decisions = await self._handle_approval_interruptions(
+                                    interruptions
+                                )
+                                await self.provide_approval_decisions(decisions)
                             continue
 
                     if response:

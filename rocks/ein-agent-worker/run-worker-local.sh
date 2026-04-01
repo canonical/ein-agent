@@ -1,48 +1,25 @@
 #!/bin/bash
 set -e
 
+# =============================================================================
+# Local Worker Runner
+# =============================================================================
+# This script starts the Ein Agent Worker locally.
+#
+# Usage:
+#   source .env && ./run-worker-local.sh
+#
+# All configuration should be set in .env (or exported before running).
+# This script only provides fallback defaults for convenience.
+# =============================================================================
+
 # Gemini API Key
 export GEMINI_API_KEY="${GEMINI_API_KEY:-your-gemini-api-key-here}"
 
 # =============================================================================
 # UTCP Service Configuration
 # =============================================================================
-# See CLAUDE.md for instructions on setting up Kubernetes ServiceAccount and token
-
-export UTCP_SERVICES="kubernetes,grafana,prometheus,loki"
-
-# Kubernetes UTCP Configuration (kubeconfig-based authentication)
-# NOTE: Kubernetes ONLY supports kubeconfig auth (no bearer token support)
-# To generate kubeconfig, see LOCAL_DEVELOPMENT.md
-export UTCP_KUBERNETES_OPENAPI_URL="${UTCP_KUBERNETES_OPENAPI_URL:-https://your-k8s-server:6443/openapi/v2}"
-export UTCP_KUBERNETES_AUTH_TYPE="kubeconfig"
-export UTCP_KUBERNETES_KUBECONFIG_CONTENT="${UTCP_KUBERNETES_KUBECONFIG_CONTENT:-$(cat ~/.kube/config 2>/dev/null | base64 -w 0)}"
-export UTCP_KUBERNETES_INSECURE="true"
-export UTCP_KUBERNETES_ENABLED="true"
-export UTCP_KUBERNETES_VERSION="1.35"
-
-# Grafana UTCP Configuration (aggregated API server)
-export UTCP_GRAFANA_OPENAPI_URL="${UTCP_GRAFANA_OPENAPI_URL:-https://your-grafana-server/openapi/v2}"
-export UTCP_GRAFANA_AUTH_TYPE="bearer"
-export UTCP_GRAFANA_TOKEN="${UTCP_GRAFANA_TOKEN:-your-grafana-token-here}"
-export UTCP_GRAFANA_INSECURE="true"
-export UTCP_GRAFANA_ENABLED="true"
-export UTCP_GRAFANA_VERSION="12"
-
-# Prometheus UTCP Configuration (no authentication required)
-export UTCP_PROMETHEUS_OPENAPI_URL="${UTCP_PROMETHEUS_OPENAPI_URL:-http://your-prometheus-url}"
-export UTCP_PROMETHEUS_AUTH_TYPE="none"
-export UTCP_PROMETHEUS_INSECURE="true"
-export UTCP_PROMETHEUS_ENABLED="true"
-export UTCP_PROMETHEUS_VERSION="3.5.0"
-
-# Loki UTCP Configuration (no authentication required)
-# NOTE: Loki does not ship an official OpenAPI spec; a hand-written spec is used
-export UTCP_LOKI_OPENAPI_URL="${UTCP_LOKI_OPENAPI_URL:-http://your-loki-url}"
-export UTCP_LOKI_AUTH_TYPE="none"
-export UTCP_LOKI_INSECURE="true"
-export UTCP_LOKI_ENABLED="true"
-export UTCP_LOKI_VERSION="3"
+export UTCP_SERVICES="${UTCP_SERVICES:-kubernetes,grafana,prometheus,loki}"
 
 # =============================================================================
 # Temporal Configuration
@@ -62,10 +39,10 @@ export ALERTMANAGER_URL="${ALERTMANAGER_URL:-http://your-alertmanager-url/cos-al
 export EIN_AGENT_MODEL="${EIN_AGENT_MODEL:-gemini/gemini-3-flash-preview}"
 
 # DSPy Prompt Optimization (see docs/dspy-prompt-optimization.md)
-export EIN_COLLECT_TRAINING_DATA="true"
-export EIN_TRAINING_DATA_PATH="./training_data"
-export EIN_PROMPT_STORE_PATH="./prompts"
-export EIN_PROMPT_VERSION="latest"
+export EIN_COLLECT_TRAINING_DATA="${EIN_COLLECT_TRAINING_DATA:-true}"
+export EIN_TRAINING_DATA_PATH="${EIN_TRAINING_DATA_PATH:-./training_data}"
+export EIN_PROMPT_STORE_PATH="${EIN_PROMPT_STORE_PATH:-./prompts}"
+export EIN_PROMPT_VERSION="${EIN_PROMPT_VERSION:-latest}"
 
 # =============================================================================
 # Start Worker

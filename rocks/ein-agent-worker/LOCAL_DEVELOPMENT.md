@@ -68,6 +68,12 @@ export UTCP_GRAFANA_INSECURE="true"  # For self-signed certificates
 export UTCP_GRAFANA_ENABLED="true"
 export UTCP_GRAFANA_VERSION="12"
 
+# Approval Policy (optional, default: read_only)
+# Options: never, always, read_only
+# Priority: UTCP_{SERVICE}_APPROVAL_POLICY > UTCP_APPROVAL_POLICY > default (read_only)
+export UTCP_APPROVAL_POLICY="never"              # Global: approve all automatically
+export UTCP_GRAFANA_APPROVAL_POLICY="read_only"  # Override: require approval for Grafana writes
+
 # Temporal Configuration
 export TEMPORAL_HOST="localhost:7233"
 export TEMPORAL_NAMESPACE="default"

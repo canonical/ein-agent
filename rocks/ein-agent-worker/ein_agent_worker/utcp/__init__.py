@@ -15,6 +15,14 @@ Architecture:
 
 from ein_agent_worker.http import AiohttpConfigManager
 from ein_agent_worker.utcp import registry
+from ein_agent_worker.utcp.auth import (
+    AuthProvider,
+    AuthProviderRegistry,
+    AuthResult,
+    BearerAuthProvider,
+    KubeconfigAuthProvider,
+    NoAuthProvider,
+)
 from ein_agent_worker.utcp.config import (
     DEFAULT_VERSIONS,
     SUPPORTED_VERSIONS,
@@ -40,6 +48,7 @@ from ein_agent_worker.utcp.openapi_handlers import (
     KubernetesOpenApiHandler,
     OpenApiHandler,
 )
+from ein_agent_worker.utcp.serializers import serialize_result, serialize_schema
 from ein_agent_worker.utcp.spec import (
     LiveURLStrategy,
     LocalFileStrategy,
@@ -47,6 +56,7 @@ from ein_agent_worker.utcp.spec import (
     SpecSourceStrategy,
 )
 from ein_agent_worker.utcp.temporal_utcp import (
+    create_grouped_utcp_workflow_tools,
     create_utcp_workflow_tools,
     get_utcp_activities,
 )
@@ -56,28 +66,37 @@ __all__ = [
     'DEFAULT_VERSIONS',
     'SUPPORTED_VERSIONS',
     'AiohttpConfigManager',
+    'AuthProvider',
+    'AuthProviderRegistry',
+    'AuthResult',
+    'BearerAuthProvider',
     'BearerTokenLoader',
     'CephVersion',
     'DefaultOpenApiHandler',
     'GrafanaOpenApiHandler',
     'GrafanaVersion',
+    'KubeconfigAuthProvider',
     'KubernetesOpenApiHandler',
     'KubernetesVersion',
     'LiveURLStrategy',
     'LocalFileHttpProtocol',
     'LocalFileStrategy',
     'LokiVersion',
+    'NoAuthProvider',
     'OpenApiHandler',
     'SpecSource',
     'SpecSourceStrategy',
     'ToolLoader',
     'UTCPConfig',
     'UTCPServiceConfig',
+    'create_grouped_utcp_workflow_tools',
     'create_utcp_tools',
     'create_utcp_workflow_tools',
     'get_api_base_url',
     'get_utcp_activities',
     'register_local_file_protocol',
     'registry',
+    'serialize_result',
+    'serialize_schema',
     'set_api_base_url',
 ]

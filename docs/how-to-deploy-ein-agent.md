@@ -320,6 +320,8 @@ UTCP (Universal Tool Calling Protocol) generates tools dynamically from OpenAPI 
 | `UTCP_{SERVICE}_ENABLED` | Optional: enable/disable service (default: true) |
 | `UTCP_{SERVICE}_INSECURE` | Optional: skip TLS verification (default: false) |
 | `UTCP_{SERVICE}_SPEC_SOURCE` | Optional: `local` or `live` (default: `local`) |
+| `UTCP_APPROVAL_POLICY` | Optional: global approval policy for all services (default: `read_only`) |
+| `UTCP_{SERVICE}_APPROVAL_POLICY` | Optional: per-service override for approval policy |
 
 **Supported Services:**
 - **kubernetes**: Requires `kubeconfig` auth (kubeconfig passed via Juju secret)
@@ -381,6 +383,35 @@ Live URL loading:
 ```
 [kubernetes] Loading OpenAPI spec from LIVE URL: https://10.x.x.x:6443/openapi/v2
 ```
+
+### Tool Call Approval Policy
+
+Tool call approval controls whether operations require human approval before execution.
+
+**Available policies:**
+
+| Policy | Description |
+|--------|-------------|
+| `read_only` (default) | Auto-approve read operations (GET, LIST), require approval for writes (POST, PUT, PATCH, DELETE) |
+| `never` | Approve all operations automatically |
+| `always` | Require human approval for every operation |
+
+**Configuration priority:** `UTCP_{SERVICE}_APPROVAL_POLICY` > `UTCP_APPROVAL_POLICY` > default (`read_only`)
+
+**Example configuration in `environment.yaml`:**
+
+```yaml
+env:
+  # Global approval policy for all services
+  - name: UTCP_APPROVAL_POLICY
+    value: "never"
+
+  # Override for specific services
+  - name: UTCP_CEPH_APPROVAL_POLICY
+    value: "always"
+```
+
+When approval is required, the workflow will pause and request human input before executing the tool call.
 
 ## Proxy Configuration
 

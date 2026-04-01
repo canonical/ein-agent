@@ -20,19 +20,17 @@ class ApprovalPolicy(StrEnum):
 
     - NEVER: Never require approval (trust all operations)
     - ALWAYS: Always require approval for every operation
-    - WRITE_OPERATIONS: Require approval only for write operations (POST, PUT, PATCH, DELETE)
-    - READ_ONLY: Require approval only for read operations (GET, LIST)
+    - READ_ONLY: Auto-approve read operations, require approval for writes
     """
 
     NEVER = 'never'
     ALWAYS = 'always'
-    WRITE_OPERATIONS = 'write_operations'
     READ_ONLY = 'read_only'
 
     @classmethod
     def default(cls) -> 'ApprovalPolicy':
-        """Default policy requires approval for all operations (safest)."""
-        return cls.ALWAYS
+        """Default policy auto-approves reads, requires approval for writes."""
+        return cls.READ_ONLY
 
 
 class WorkflowInterruption(BaseModel):
@@ -42,7 +40,7 @@ class WorkflowInterruption(BaseModel):
     """
 
     id: str = Field(description='Unique identifier for this interruption')
-    type: Literal['tool_approval', 'agent_selection', 'human_input'] = Field(
+    type: Literal['tool_approval', 'agent_selection', 'human_input', 'user_selection'] = Field(
         description='Type of interruption'
     )
     agent_name: str = Field(description='Name of the agent requesting the interruption')
@@ -51,6 +49,9 @@ class WorkflowInterruption(BaseModel):
         default=None, description='Tool arguments for tool_approval type'
     )
     question: str | None = Field(default=None, description='Question for human_input type')
+    options: list[str] | None = Field(
+        default=None, description='Selection options for user_selection type'
+    )
     context: dict[str, Any] = Field(
         default_factory=dict,
         description='Additional context (risk_level, operation_description, etc.)',
@@ -69,6 +70,15 @@ class ApprovalDecision(BaseModel):
         default=False, description='If True, cache this decision for future similar operations'
     )
     reason: str | None = Field(default=None, description='Optional reason for the decision')
+
+
+class SelectionResponse(BaseModel):
+    """Represents a user's selection response."""
+
+    interruption_id: str = Field(description='ID of the interruption being responded to')
+    selected_option: str | None = Field(
+        default=None, description='The selected option, or None if cancelled'
+    )
 
 
 class WorkflowStatus(StrEnum):
@@ -151,6 +161,7 @@ class WorkflowEventType(StrEnum):
     MESSAGE = 'message'
     CONFIRMATION = 'confirmation'
     SELECTION = 'selection'
+    SELECTION_RESPONSE = 'selection_response'
     STOP = 'stop'
 
 

@@ -16,10 +16,13 @@ from agents import Agent
 from ein_agent_worker.models.domain import DomainType, SkillInfo
 
 # =============================================================================
-# Domain to UTCP Services Mapping
+# Domain to UTCP Service Types Mapping
 # =============================================================================
-# Which UTCP services are relevant for each domain
-DOMAIN_UTCP_SERVICES: dict[DomainType, set[str]] = {
+# Which UTCP service types are relevant for each domain.
+# Tools are keyed by service type (not instance name), so multiple instances
+# of the same type (e.g., kubernetes-prod, kubernetes-staging) are all included
+# when matching by type.
+DOMAIN_UTCP_SERVICE_TYPES: dict[DomainType, set[str]] = {
     DomainType.COMPUTE: {'kubernetes'},
     DomainType.STORAGE: {'ceph', 'kubernetes'},  # kubernetes for PVC access
     DomainType.NETWORK: {'kubernetes'},
@@ -39,8 +42,18 @@ DOMAIN_NAMES: dict[DomainType, str] = {
 # =============================================================================
 
 
-def build_services_section(available_services: list[str]) -> str:
-    """Build the UTCP services section for agent instructions."""
+def build_services_section(
+    available_services: list[str],
+    instance_names: dict[str, list[str]] | None = None,
+) -> str:
+    """Build the UTCP services section for agent instructions.
+
+    Args:
+        available_services: List of service type names (e.g., ['kubernetes', 'grafana'])
+        instance_names: Optional dict mapping service_type -> list of instance names.
+            When provided (multi-instance), shows per-instance call tools.
+            When None, call tools use the service type name directly.
+    """
     if not available_services:
         return (
             'NOTE: No UTCP services are currently configured for your domain. '
@@ -49,12 +62,22 @@ def build_services_section(available_services: list[str]) -> str:
     service_list = ', '.join(f'`{s}`' for s in sorted(available_services))
     tool_lines = []
     for s in sorted(available_services):
+        # Read tools are always named after the service type
         tool_lines.append(f'- `search_{s}_operations` - Search for API operations by keyword')
         tool_lines.append(f'- `get_{s}_operation_details` - Get parameter schema for an operation')
-        tool_lines.append(f'- `call_{s}_operation` - Execute an API operation')
         tool_lines.append(
             f'- `list_{s}_operations` - List available operations (with tag filtering)'
         )
+        # Call tools: per-instance when multi-instance, otherwise by type
+        instances = (instance_names or {}).get(s, [s])
+        for inst in sorted(instances):
+            call_name = inst.replace('-', '_')
+            if len(instances) > 1:
+                tool_lines.append(
+                    f'- `call_{call_name}_operation` - Execute an API operation on `{inst}`'
+                )
+            else:
+                tool_lines.append(f'- `call_{call_name}_operation` - Execute an API operation')
     tools_block = '\n'.join(tool_lines)
     return (
         f'You have UTCP tools for the following services: {service_list}.\n'
@@ -412,6 +435,7 @@ def new_specialist_agent(
     tools: list[Callable] | None = None,
     available_services: list[str] | None = None,
     available_skills: list[SkillInfo] | None = None,
+    instance_names: dict[str, list[str]] | None = None,
 ) -> Agent:
     """Create a new domain specialist agent with dynamic instructions.
 
@@ -422,8 +446,10 @@ def new_specialist_agent(
         domain: The domain type (COMPUTE, STORAGE, NETWORK, OBSERVABILITY)
         model: LLM model to use
         tools: Optional list of tools (e.g., shared context tools, UTCP tools)
-        available_services: UTCP service names available for this domain
+        available_services: UTCP service type names available for this domain
         available_skills: Skill metadata for all registered skills
+        instance_names: Optional mapping of service_type -> list of instance names.
+            Used to show per-instance call tools in instructions.
 
     Returns:
         Configured specialist Agent
@@ -431,7 +457,9 @@ def new_specialist_agent(
     name = DOMAIN_NAMES[domain]
     template = _DOMAIN_TEMPLATES[domain]
 
-    services_section = build_services_section(available_services or [])
+    services_section = build_services_section(
+        available_services or [], instance_names=instance_names
+    )
     skills_section = build_skills_section(available_skills, domain.value)
 
     instructions = template.substitute(

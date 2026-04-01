@@ -2,7 +2,11 @@
 
 import logging
 
-from ein_agent_worker.utcp.openapi_handlers.base import BearerTokenLoader, OpenApiHandler
+from ein_agent_worker.utcp.openapi_handlers.base import (
+    BearerTokenLoader,
+    OpenApiHandler,
+    utcp_namespace_prefix,
+)
 from utcp.data.variable_loader import VariableLoader
 
 logger = logging.getLogger(__name__)
@@ -19,11 +23,12 @@ class DefaultOpenApiHandler(OpenApiHandler):
     def __init__(self, service_name: str = ''):
         self._service_name = service_name
 
-    def get_variable_loader(self, token: str) -> VariableLoader | None:
+    def get_variable_loader(self, token: str, instance_name: str = '') -> VariableLoader | None:
         """Create a generic bearer token loader for the service."""
         if not self._service_name:
             return None
-        pattern = rf'{self._service_name}_API_KEY_\d+'
+        prefix = utcp_namespace_prefix(instance_name) if instance_name else self._service_name
+        pattern = rf'{prefix}_API_KEY_\d+'
         return BearerTokenLoader(token=token, patterns=[pattern])
 
     def preprocess_spec(self, spec_data: dict, service_name: str) -> dict:

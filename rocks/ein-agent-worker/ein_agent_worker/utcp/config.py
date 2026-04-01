@@ -1,7 +1,8 @@
 """UTCP configuration from environment variables.
 
 Configuration Format:
-    UTCP_SERVICES: Comma-separated list of service names (e.g., "kubernetes,grafana,ceph")
+    UTCP_SERVICES: Comma-separated list of service instance names
+        (e.g., "kubernetes,grafana,ceph" or "kubernetes-prod,kubernetes-staging,grafana")
     UTCP_{SERVICE}_OPENAPI_URL: URL to the OpenAPI spec (required)
     UTCP_{SERVICE}_AUTH_TYPE: Auth type - 'proxy', 'bearer', 'api_key', 'jwt', 'kubeconfig'
     UTCP_{SERVICE}_TOKEN: Bearer token for direct API access (required when AUTH_TYPE=bearer)
@@ -10,23 +11,33 @@ Configuration Format:
     UTCP_{SERVICE}_ENABLED: Enable/disable the service (default: true)
     UTCP_{SERVICE}_VERSION: Version of the spec to use (default: latest supported)
     UTCP_{SERVICE}_SPEC_SOURCE: Where to load OpenAPI spec - 'local' or 'live' (default: local)
+    UTCP_{SERVICE}_TYPE: Explicit service type override (e.g., 'kubernetes')
 
-Example (Kubernetes with kubeconfig):
+Multi-Instance Support:
+    Multiple instances of the same service type can be configured by using unique
+    instance names with a type suffix (e.g., "kubernetes-prod", "kubernetes-staging").
+    The service type is auto-detected by stripping hyphen-suffixes from the instance
+    name, or can be set explicitly via UTCP_{SERVICE}_TYPE.
+
+Example (single Kubernetes instance):
     export UTCP_SERVICES="kubernetes,grafana"
     export UTCP_KUBERNETES_OPENAPI_URL="https://10.0.0.1:6443/openapi/v2"
     export UTCP_KUBERNETES_AUTH_TYPE="kubeconfig"
     export UTCP_KUBERNETES_KUBECONFIG_CONTENT="<base64-encoded-kubeconfig>"
-    export UTCP_KUBERNETES_INSECURE="true"
-    export UTCP_KUBERNETES_VERSION="1.35"
 
-Example (Grafana with bearer token):
-    export UTCP_GRAFANA_OPENAPI_URL="https://grafana.example.com/api/swagger.json"
-    export UTCP_GRAFANA_AUTH_TYPE="bearer"
-    export UTCP_GRAFANA_TOKEN="glsa_xxxxxxxxxxxxx"
+Example (multiple Kubernetes clusters):
+    export UTCP_SERVICES="kubernetes-prod,kubernetes-staging,grafana"
+    export UTCP_KUBERNETES_PROD_OPENAPI_URL="https://prod-k8s:6443/openapi/v2"
+    export UTCP_KUBERNETES_PROD_AUTH_TYPE="kubeconfig"
+    export UTCP_KUBERNETES_PROD_KUBECONFIG_CONTENT="<base64>"
+    export UTCP_KUBERNETES_STAGING_OPENAPI_URL="https://staging-k8s:6443/openapi/v2"
+    export UTCP_KUBERNETES_STAGING_AUTH_TYPE="kubeconfig"
+    export UTCP_KUBERNETES_STAGING_KUBECONFIG_CONTENT="<base64>"
 """
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -43,19 +54,17 @@ class ApprovalPolicy(StrEnum):
 
     - NEVER: Never require approval (trust all operations)
     - ALWAYS: Always require approval for every operation
-    - WRITE_OPERATIONS: Require approval only for write operations (POST, PUT, PATCH, DELETE)
-    - READ_ONLY: Require approval only for read operations (GET, LIST)
+    - READ_ONLY: Auto-approve read operations, require approval for writes
     """
 
     NEVER = 'never'
     ALWAYS = 'always'
-    WRITE_OPERATIONS = 'write_operations'
     READ_ONLY = 'read_only'
 
     @classmethod
     def default(cls) -> 'ApprovalPolicy':
-        """Default policy is to approve writes only in production."""
-        return cls.WRITE_OPERATIONS
+        """Default policy auto-approves reads, requires approval for writes."""
+        return cls.READ_ONLY
 
 
 # HTTP methods that are considered "write" operations
@@ -148,6 +157,85 @@ DEFAULT_VERSIONS: dict[str, str] = {
     'loki': LokiVersion.default().value,
 }
 
+# Known service types (derived from SUPPORTED_VERSIONS)
+KNOWN_SERVICE_TYPES: set[str] = set(SUPPORTED_VERSIONS.keys())
+
+
+# =============================================================================
+# Instance Name Validation and Type Resolution
+# =============================================================================
+
+# Valid instance name: lowercase letters/digits separated by single hyphens
+_INSTANCE_NAME_PATTERN = re.compile(r'^[a-z][a-z0-9]*(-[a-z0-9]+)*$')
+
+
+def validate_instance_name(name: str) -> bool:
+    """Validate UTCP service instance name format.
+
+    Rules:
+    - Must match pattern: lowercase letters/digits separated by single hyphens
+    - No leading/trailing hyphens, no consecutive hyphens
+    - Must start with a letter
+    - Minimum length: 1 character
+
+    Examples:
+        Valid: 'kubernetes', 'kubernetes-prod', 'k8s-cluster-01'
+        Invalid: 'Kubernetes', 'kubernetes_prod', '-kubernetes', 'kubernetes-'
+
+    Args:
+        name: The instance name to validate.
+
+    Returns:
+        True if valid, False otherwise.
+    """
+    if not name:
+        return False
+    return bool(_INSTANCE_NAME_PATTERN.match(name))
+
+
+def resolve_service_type(instance_name: str) -> str:
+    """Resolve the service type from an instance name.
+
+    Resolution order:
+    1. Explicit env var: UTCP_{INSTANCE_KEY}_TYPE
+    2. Instance name is itself a known type (e.g., 'kubernetes')
+    3. Strip last hyphen-segment progressively (e.g., 'kubernetes-prod' -> 'kubernetes')
+    4. Fall back to instance name
+
+    Args:
+        instance_name: The unique instance name (e.g., 'kubernetes-prod').
+
+    Returns:
+        The resolved service type string (e.g., 'kubernetes').
+    """
+    instance_key = instance_name.upper().replace('-', '_')
+
+    # 1. Explicit override via env var
+    explicit_type = os.getenv(f'UTCP_{instance_key}_TYPE', '').lower()
+    if explicit_type:
+        if explicit_type not in KNOWN_SERVICE_TYPES:
+            logger.warning(
+                "UTCP service '%s' has explicit TYPE='%s' which is not a known type (%s)",
+                instance_name,
+                explicit_type,
+                ', '.join(sorted(KNOWN_SERVICE_TYPES)),
+            )
+        return explicit_type
+
+    # 2. Instance name is itself a known type
+    if instance_name in KNOWN_SERVICE_TYPES:
+        return instance_name
+
+    # 3. Progressive suffix stripping
+    parts = instance_name.split('-')
+    for i in range(len(parts) - 1, 0, -1):
+        candidate = '-'.join(parts[:i])
+        if candidate in KNOWN_SERVICE_TYPES:
+            return candidate
+
+    # 4. Fallback to instance name
+    return instance_name
+
 
 # =============================================================================
 # Auth Validation Helpers
@@ -239,30 +327,39 @@ def _validate_bearer_auth(service_name: str, service_key: str) -> bool:
 
 @dataclass
 class UTCPServiceConfig:
-    """Configuration for a single UTCP service.
+    """Configuration for a single UTCP service instance.
 
     Attributes:
-        name: Unique name of the service (e.g., 'kubernetes', 'grafana')
+        name: Unique instance name (e.g., 'kubernetes', 'kubernetes-prod')
         openapi_url: URL to the OpenAPI specification endpoint (for runtime calls)
+        service_type: Resolved service type (e.g., 'kubernetes'). Used for
+            validation rules, spec file lookup, and domain routing.
         auth_type: Authentication type ('proxy', 'bearer', 'api_key', 'jwt')
         token: Bearer token for direct API access (required when auth_type='bearer')
         insecure: Skip TLS verification for self-signed certificates
         enabled: Whether the service is enabled
         version: Version of the OpenAPI spec to use (e.g., '1.30', 'reef', '11')
         dynamic: If True, generate tools at runtime from OpenAPI URL
-        approval_policy: Policy for requiring human approval (never, always, write_operations)
+        approval_policy: Policy for requiring human approval (never, always, read_only)
+        spec_source: Where to load spec: 'local' or 'live'
     """
 
     name: str
     openapi_url: str
+    service_type: str = ''
     auth_type: str = 'proxy'
     token: str = ''
     insecure: bool = False
     enabled: bool = True
     version: str = ''
     dynamic: bool = False
-    approval_policy: str = 'always'  # Default: require approval for all operations (safest)
+    approval_policy: str = 'read_only'  # Default: auto-approve reads, require approval for writes
     spec_source: str = 'local'  # Where to load spec: 'local' or 'live'
+
+    @property
+    def resolved_type(self) -> str:
+        """Return service_type if set, otherwise fall back to name."""
+        return self.service_type if self.service_type else self.name
 
 
 @dataclass
@@ -308,8 +405,27 @@ class UTCPConfig:
 
     @staticmethod
     def _load_service_config(service_name: str) -> UTCPServiceConfig | None:
-        """Load configuration for a single UTCP service."""
+        """Load configuration for a single UTCP service instance."""
+        # Validate instance name format
+        if not validate_instance_name(service_name):
+            logger.error(
+                "UTCP service '%s' has invalid instance name. "
+                'Names must be lowercase alphanumeric with hyphens '
+                "(e.g., 'kubernetes', 'kubernetes-prod'). Skipping.",
+                service_name,
+            )
+            return None
+
         service_key = service_name.upper().replace('-', '_')
+
+        # Resolve service type (e.g., 'kubernetes-prod' -> 'kubernetes')
+        service_type = resolve_service_type(service_name)
+        if service_type != service_name:
+            logger.info(
+                "UTCP service '%s' resolved to type '%s'",
+                service_name,
+                service_type,
+            )
 
         # Check if enabled
         enabled_key = f'UTCP_{service_key}_ENABLED'
@@ -327,16 +443,16 @@ class UTCPConfig:
             )
             return None
 
-        # Get auth type
+        # Get auth type - validate against service type (not instance name)
         auth_type_key = f'UTCP_{service_key}_AUTH_TYPE'
         auth_type = os.getenv(auth_type_key, 'proxy').lower()
 
-        # Validate auth type against service-specific supported types
-        supported_auth_types = _get_supported_auth_types(service_name)
+        supported_auth_types = _get_supported_auth_types(service_type)
         if auth_type not in supported_auth_types:
             logger.error(
-                "UTCP service '%s' has invalid auth type '%s' (supported: %s)",
+                "UTCP service '%s' (type=%s) has invalid auth type '%s' (supported: %s)",
                 service_name,
+                service_type,
                 auth_type,
                 ', '.join(supported_auth_types),
             )
@@ -364,34 +480,36 @@ class UTCPConfig:
         dynamic_key = f'UTCP_{service_key}_DYNAMIC'
         dynamic = os.getenv(dynamic_key, 'false').lower() == 'true'
 
-        # Get approval policy (default: always require approval for safety)
+        # Get approval policy: per-service overrides global, global overrides default
+        global_approval_policy = os.getenv('UTCP_APPROVAL_POLICY', 'read_only').lower()
         approval_policy_key = f'UTCP_{service_key}_APPROVAL_POLICY'
-        approval_policy = os.getenv(approval_policy_key, 'always').lower()
+        approval_policy = os.getenv(approval_policy_key, global_approval_policy).lower()
 
         # Validate approval policy
-        valid_policies = {'never', 'always', 'write_operations', 'read_only'}
+        valid_policies = {'never', 'always', 'read_only'}
         if approval_policy not in valid_policies:
             logger.warning(
                 "UTCP service '%s' has invalid approval_policy '%s' "
-                "(valid: %s), using default 'write_operations'",
+                "(valid: %s), using default 'read_only'",
                 service_name,
                 approval_policy,
                 ', '.join(valid_policies),
             )
-            approval_policy = 'write_operations'
+            approval_policy = 'read_only'
 
-        # Get spec source strategy (local or live)
+        # Get spec source strategy - validate against service type
         spec_source_key = f'UTCP_{service_key}_SPEC_SOURCE'
         spec_source = os.getenv(spec_source_key, 'local').lower()
 
         supported_spec_sources = SERVICE_SPEC_SOURCES.get(
-            service_name, SERVICE_SPEC_SOURCES['_default']
+            service_type, SERVICE_SPEC_SOURCES['_default']
         )
         if spec_source not in supported_spec_sources:
             logger.warning(
-                "UTCP service '%s' does not support spec_source '%s' "
+                "UTCP service '%s' (type=%s) does not support spec_source '%s' "
                 "(supported: %s), using default 'local'",
                 service_name,
+                service_type,
                 spec_source,
                 ', '.join(supported_spec_sources),
             )
@@ -400,6 +518,7 @@ class UTCPConfig:
         return UTCPServiceConfig(
             name=service_name,
             openapi_url=openapi_url,
+            service_type=service_type,
             auth_type=auth_type,
             token=token,
             insecure=insecure,

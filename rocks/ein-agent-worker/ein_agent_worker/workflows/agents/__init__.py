@@ -11,11 +11,13 @@ from ein_agent_worker.workflows.agents.factory import (
     get_available_skills_metadata,
 )
 from ein_agent_worker.workflows.agents.tools import (
+    create_ask_selection_tool,
     create_ask_user_tool,
     create_fetch_alerts_tool,
 )
 
 __all__ = [
+    'create_ask_selection_tool',
     'create_ask_user_tool',
     'create_fetch_alerts_tool',
     'create_investigation_agent_graph',

@@ -34,8 +34,10 @@ with workflow.unsafe.imports_passed_through():
     from ein_agent_worker.skills import registry as skill_registry
     from ein_agent_worker.skills.temporal_skills import create_skill_workflow_tools
     from ein_agent_worker.utcp import registry as utcp_registry
-    from ein_agent_worker.utcp.temporal_utcp import create_utcp_workflow_tools
+    from ein_agent_worker.utcp.config import UTCPServiceConfig  # noqa: TC001
+    from ein_agent_worker.utcp.temporal_utcp import create_grouped_utcp_workflow_tools
     from ein_agent_worker.workflows.agents import (
+        create_ask_selection_tool,
         create_ask_user_tool,
         create_fetch_alerts_tool,
         create_investigation_agent_graph,
@@ -116,6 +118,23 @@ class HumanInTheLoopWorkflow:
             WorkflowEvent(
                 type=WorkflowEventType.SELECTION,
                 payload=selected_agent if selected_agent else None,
+                timestamp=workflow.now(),
+            )
+        )
+
+    @workflow.signal
+    async def provide_selection_response(self, response: dict) -> None:
+        """User provides a selection response for a user_selection interruption.
+
+        Args:
+            response: SelectionResponse dict with interruption_id and selected_option
+        """
+        selected = response.get('selected_option')
+        workflow.logger.info(f'Received selection response: {selected}')
+        self._event_queue.append(
+            WorkflowEvent(
+                type=WorkflowEventType.SELECTION_RESPONSE,
+                payload=selected,
                 timestamp=workflow.now(),
             )
         )
@@ -219,6 +238,13 @@ class HumanInTheLoopWorkflow:
             set_pending_question=lambda q: setattr(self._state, 'pending_question', q),
             wait_for_message=lambda: self._wait_for_event_type(WorkflowEventType.MESSAGE),
         )
+        ask_selection_tool = create_ask_selection_tool(
+            add_interruption=lambda i: self._state.interruptions.append(i),
+            clear_interruptions=lambda: setattr(self._state, 'interruptions', []),
+            wait_for_selection_response=lambda: self._wait_for_event_type(
+                WorkflowEventType.SELECTION_RESPONSE
+            ),
+        )
         fetch_alerts_tool = create_fetch_alerts_tool(
             get_alertmanager_url=lambda: self._config.alertmanager_url,
             store_alerts=lambda alerts: setattr(self._state, 'last_fetched_alerts', alerts),
@@ -231,6 +257,7 @@ class HumanInTheLoopWorkflow:
             utcp_tools=self._utcp_tools,
             skill_tools=self._skill_tools,
             ask_user_tool=ask_user_tool,
+            ask_selection_tool=ask_selection_tool,
             fetch_alerts_tool=fetch_alerts_tool,
             available_skills=available_skills,
         )
@@ -431,11 +458,12 @@ class HumanInTheLoopWorkflow:
         """Initialize UTCP tools from pre-registered clients.
 
         UTCP clients are initialized at worker startup (where network I/O is allowed)
-        and stored in the registry. This method creates the 3 meta-tools
-        (search, get_details, call) for each registered service.
+        and stored in the registry. This method creates grouped tools per service type:
+        - Shared read tools (search/list/get_details) per type
+        - Per-instance call tools for each instance
 
-        These tools execute UTCP operations as Temporal activities, allowing
-        network I/O to happen outside the workflow sandbox.
+        Tools are keyed by service_type in self._utcp_tools so that domain routing
+        works by type (e.g., COMPUTE -> 'kubernetes' -> all kubernetes tools).
         """
         services = utcp_registry.list_services()
 
@@ -445,22 +473,27 @@ class HumanInTheLoopWorkflow:
 
         workflow.logger.info(f'Creating tools for {len(services)} UTCP service(s)')
 
+        # Group instances by service type
+        type_groups: dict[str, dict[str, UTCPServiceConfig | None]] = {}
         for service_name in services:
-            # Get service config for approval policy
             service_config = utcp_registry.get_service_config(service_name)
+            svc_type = service_config.resolved_type if service_config else service_name
+            if svc_type not in type_groups:
+                type_groups[svc_type] = {}
+            type_groups[svc_type][service_name] = service_config
 
-            # Create workflow tools that execute as activities
-            # Pass sticky_approvals dict so tools can check
-            # for cached decisions. Since dicts are mutable,
-            # updates will be visible to approval checkers.
-            tools = create_utcp_workflow_tools(
-                service_name,
-                service_config=service_config,
+        # Create grouped tools per service type
+        for svc_type, instances in type_groups.items():
+            tools = create_grouped_utcp_workflow_tools(
+                service_type=svc_type,
+                instances=instances,
                 sticky_approvals=self._state.sticky_approvals,
             )
-            self._utcp_tools[service_name] = tools
+            self._utcp_tools[svc_type] = tools
+            instance_names = list(instances.keys())
             workflow.logger.info(
-                f'Created {len(tools)} tools for {service_name}: '
+                f'Created {len(tools)} tools for type {svc_type} '
+                f'(instances: {instance_names}): '
                 f'{[getattr(t, "name", str(t)) for t in tools]}'
             )
 

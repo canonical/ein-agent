@@ -73,6 +73,20 @@ def list_services() -> list[str]:
     return list(_utcp_clients.keys())
 
 
+def list_services_by_type(service_type: str) -> list[str]:
+    """List all registered instance names matching a given service type.
+
+    Args:
+        service_type: Service type to filter by (e.g., 'kubernetes')
+
+    Returns:
+        List of instance names matching the service type
+    """
+    return [
+        name for name, config in _service_configs.items() if config.resolved_type == service_type
+    ]
+
+
 def clear() -> None:
     """Clear all registered clients and configs."""
     _utcp_clients.clear()

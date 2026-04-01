@@ -2,7 +2,11 @@
 
 import logging
 
-from ein_agent_worker.utcp.openapi_handlers.base import BearerTokenLoader, OpenApiHandler
+from ein_agent_worker.utcp.openapi_handlers.base import (
+    BearerTokenLoader,
+    OpenApiHandler,
+    utcp_namespace_prefix,
+)
 from utcp.data.variable_loader import VariableLoader
 
 logger = logging.getLogger(__name__)
@@ -18,12 +22,14 @@ class GrafanaOpenApiHandler(OpenApiHandler):
     Supported auth types are defined in config.SERVICE_AUTH_TYPES.
     """
 
-    def get_variable_loader(self, token: str) -> VariableLoader | None:
+    def get_variable_loader(self, token: str, instance_name: str = '') -> VariableLoader | None:
         """Create a bearer token loader for Grafana API key variables."""
-        return BearerTokenLoader(
-            token=token,
-            patterns=[r'grafana_API_KEY_\d+'],
-        )
+        if instance_name:
+            prefix = utcp_namespace_prefix(instance_name)
+            patterns = [rf'{prefix}_API_KEY_\d+']
+        else:
+            patterns = [r'grafana_API_KEY_\d+']
+        return BearerTokenLoader(token=token, patterns=patterns)
 
     def preprocess_spec(self, spec_data: dict, service_name: str) -> dict:
         """Force api_key security, remove basic auth, and filter to read-only.

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.2.1] - 2026-04-01
+
+### Features
+
+- Add multi-instance UTCP support across all agents (e.g., `kubernetes-first`, `kubernetes-second`)
+- Add auth provider registry with kubeconfig, bearer, and no-auth providers
+- Add `create_grouped_utcp_workflow_tools` for type-grouped tool loading
+- Add service type registry for multi-instance lookups
+- Surface instance names in PlanningAgent, ContextAgent, and InvestigationAgent instructions
+
+### Refactoring
+
+- Extract authentication logic from loader into dedicated `utcp/auth.py` module
+- Extract serialization helpers into `utcp/serializers.py` module
+- Simplify `utcp/loader.py` by delegating to auth providers and spec strategies
+- Move HTTP method constants (`READ_HTTP_METHODS`, `WRITE_HTTP_METHODS`) to `utcp/config.py`
+
+### Tests
+
+- Add tests for auth providers, config, registry, serializers, and specialists
+
 ## [0.2.0] - 2026-03-26
 
 ### Features

@@ -2,7 +2,11 @@
 
 import logging
 
-from ein_agent_worker.utcp.openapi_handlers.base import BearerTokenLoader, OpenApiHandler
+from ein_agent_worker.utcp.openapi_handlers.base import (
+    BearerTokenLoader,
+    OpenApiHandler,
+    utcp_namespace_prefix,
+)
 from utcp.data.variable_loader import VariableLoader
 
 logger = logging.getLogger(__name__)
@@ -15,19 +19,21 @@ class KubernetesOpenApiHandler(OpenApiHandler):
     credential management. Supported auth types are defined in config.SERVICE_AUTH_TYPES.
     """
 
-    def get_variable_loader(self, token: str) -> VariableLoader | None:
+    def get_variable_loader(self, token: str, instance_name: str = '') -> VariableLoader | None:
         """Create a bearer token loader for Kubernetes API key variables.
 
         Note: Token is extracted from kubeconfig by the loader, then used
         for API authentication via the BearerTokenLoader.
         """
-        return BearerTokenLoader(
-            token=token,
-            patterns=[
+        if instance_name:
+            prefix = utcp_namespace_prefix(instance_name)
+            patterns = [rf'{prefix}_API_KEY_\d+']
+        else:
+            patterns = [
                 r'k8s_API_KEY_\d+',
                 r'kubernetes_API_KEY_\d+',
-            ],
-        )
+            ]
+        return BearerTokenLoader(token=token, patterns=patterns)
 
     def preprocess_spec(self, spec_data: dict, service_name: str) -> dict:
         """Filter to read-only operations for security."""

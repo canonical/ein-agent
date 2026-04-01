@@ -17,6 +17,7 @@ from agents import Agent
 
 from ein_agent_worker.models.domain import DomainType, SkillInfo
 from ein_agent_worker.models.investigation import SharedContext
+from ein_agent_worker.utcp import registry as utcp_registry
 from ein_agent_worker.workflows.agents.instructions import (
     format_context_instructions,
     format_investigation_instructions,
@@ -27,7 +28,7 @@ from ein_agent_worker.workflows.agents.shared_context_tools import (
 )
 from ein_agent_worker.workflows.agents.specialists import (
     DOMAIN_NAMES,
-    DOMAIN_UTCP_SERVICES,
+    DOMAIN_UTCP_SERVICE_TYPES,
     new_specialist_agent,
 )
 
@@ -67,6 +68,7 @@ def create_investigation_agent_graph(
     utcp_tools: dict[str, list],
     skill_tools: list,
     ask_user_tool: Callable,
+    ask_selection_tool: Callable,
     fetch_alerts_tool: Callable,
     available_skills: list[SkillInfo],
 ) -> Agent:
@@ -78,6 +80,7 @@ def create_investigation_agent_graph(
         utcp_tools: Dict mapping service_name -> list of UTCP tools
         skill_tools: List of skill discovery/reading tools
         ask_user_tool: Pre-created ask_user tool (workflow-bound)
+        ask_selection_tool: Pre-created ask_selection tool (workflow-bound)
         fetch_alerts_tool: Pre-created fetch_alerts tool (workflow-bound)
         available_skills: Metadata for all registered skills
 
@@ -91,6 +94,13 @@ def create_investigation_agent_graph(
         len(available_skills),
     )
 
+    # --- Global instance name mapping (for all agents) ---
+    all_instance_names: dict[str, list[str]] = {}
+    for svc_type in available_services:
+        instances = utcp_registry.list_services_by_type(svc_type)
+        if instances:
+            all_instance_names[svc_type] = instances
+
     # --- Specialists (one per domain) ---
     specialists: dict[DomainType, Agent] = {}
     for domain in DomainType:
@@ -102,10 +112,17 @@ def create_investigation_agent_graph(
         # UTCP tools for this domain's services
         domain_utcp_tools = _get_domain_utcp_tools(domain, utcp_tools)
 
-        # Active UTCP services for this domain (for instruction formatting)
+        # Active UTCP service types for this domain (for instruction formatting)
         active_services = [
-            s for s in sorted(DOMAIN_UTCP_SERVICES.get(domain, set())) if s in utcp_tools
+            s for s in sorted(DOMAIN_UTCP_SERVICE_TYPES.get(domain, set())) if s in utcp_tools
         ]
+
+        # Filter global instance_names to this domain's service types
+        domain_instance_names = {
+            svc_type: all_instance_names[svc_type]
+            for svc_type in active_services
+            if svc_type in all_instance_names
+        }
 
         specialists[domain] = new_specialist_agent(
             domain=domain,
@@ -120,6 +137,7 @@ def create_investigation_agent_graph(
             ],
             available_services=active_services,
             available_skills=available_skills,
+            instance_names=domain_instance_names,
         )
 
     # --- Investigation Agent (coordinator) ---
@@ -129,11 +147,14 @@ def create_investigation_agent_graph(
     investigation_agent = Agent(
         name='InvestigationAgent',
         model=model,
-        instructions=format_investigation_instructions(available_services),
+        instructions=format_investigation_instructions(
+            available_services, instance_names=all_instance_names
+        ),
         handoff_description='Execute an approved investigation plan by coordinating '
         'domain specialists. Delegates all infrastructure queries to specialists.',
         tools=[
             ask_user_tool,
+            ask_selection_tool,
             fetch_alerts_tool,
             inv_print,
             inv_get,
@@ -148,7 +169,9 @@ def create_investigation_agent_graph(
     context_agent = Agent(
         name='ContextAgent',
         model=model,
-        instructions=format_context_instructions(available_services, available_skills),
+        instructions=format_context_instructions(
+            available_services, available_skills, instance_names=all_instance_names
+        ),
         handoff_description='Quickly retrieve infrastructure information using '
         'UTCP tools. For simple queries like listing pods, checking health, etc.',
         tools=[*all_utcp_tools, *skill_tools],
@@ -161,9 +184,12 @@ def create_investigation_agent_graph(
     planning_agent = Agent(
         name='PlanningAgent',
         model=model,
-        instructions=format_planning_instructions(available_services, available_skills),
+        instructions=format_planning_instructions(
+            available_services, available_skills, instance_names=all_instance_names
+        ),
         tools=[
             ask_user_tool,
+            ask_selection_tool,
             fetch_alerts_tool,
             planner_get,
             planner_print,
@@ -188,9 +214,13 @@ def create_investigation_agent_graph(
 
 
 def _get_domain_utcp_tools(domain: DomainType, utcp_tools: dict[str, list]) -> list:
-    """Get UTCP tools for a specific domain's services."""
+    """Get UTCP tools for a specific domain's service types.
+
+    utcp_tools is keyed by service_type (e.g., 'kubernetes'), so matching
+    is a direct key lookup against DOMAIN_UTCP_SERVICE_TYPES.
+    """
     tools = []
-    for service in DOMAIN_UTCP_SERVICES.get(domain, set()):
-        if service in utcp_tools:
-            tools.extend(utcp_tools[service])
+    for service_type in DOMAIN_UTCP_SERVICE_TYPES.get(domain, set()):
+        if service_type in utcp_tools:
+            tools.extend(utcp_tools[service_type])
     return tools

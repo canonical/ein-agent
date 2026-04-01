@@ -1,7 +1,7 @@
 name: ein-agent-worker
 base: ubuntu@24.04
 build-base: ubuntu@24.04
-version: '0.2.0'
+version: '0.2.1'
 summary: Ein Agent Temporal Worker
 description: Temporal worker for temporal-worker-k8s-operator
 license: Apache-2.0
