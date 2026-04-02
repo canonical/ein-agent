@@ -41,6 +41,12 @@ class HITLWorkflowConfig(BaseModel):
         default=None, description='Alertmanager URL for fetching alerts'
     )
     max_turns: int = Field(default=50, ge=1, description='Maximum agent turns')
+    workflow_timeout: int = Field(
+        default=3600,
+        ge=60,
+        description='Global workflow execution timeout in seconds (default: 1 hour). '
+        'Temporal will terminate the workflow when this timeout is reached.',
+    )
 
     @classmethod
     def from_cli_args(
@@ -50,6 +56,7 @@ class HITLWorkflowConfig(BaseModel):
         temporal_queue: str | None,
         workflow_id: str | None,
         max_turns: int,
+        workflow_timeout: int = 3600,
     ) -> 'HITLWorkflowConfig':
         """Create config from CLI arguments."""
         temporal_config = TemporalConfig()
@@ -64,4 +71,5 @@ class HITLWorkflowConfig(BaseModel):
             temporal=temporal_config,
             workflow_id=workflow_id,
             max_turns=max_turns,
+            workflow_timeout=workflow_timeout,
         )

@@ -88,6 +88,7 @@ class WorkflowStatus(StrEnum):
     RUNNING = 'running'  # Agent processing / waiting for user
     COMPLETED = 'completed'  # Investigation finished with report
     ENDED = 'ended'  # User terminated early
+    TIMED_OUT = 'timed_out'  # Global workflow timeout reached (Temporal execution_timeout)
 
 
 class ChatMessage(BaseModel):

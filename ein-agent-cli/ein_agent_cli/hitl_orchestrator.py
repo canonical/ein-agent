@@ -3,7 +3,7 @@
 import asyncio
 import functools
 import readline  # noqa: F401
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import temporalio.common
@@ -16,7 +16,7 @@ from ein_agent_cli.models import HITLWorkflowConfig
 
 
 def handle_rpc_error(return_on_error: Any = None, print_error: bool = True):
-    """Decorator to handle RPC errors (specifically workflow completion)."""
+    """Decorator to handle RPC errors (specifically workflow completion/termination)."""
 
     def decorator(func):
         @functools.wraps(func)
@@ -24,10 +24,14 @@ def handle_rpc_error(return_on_error: Any = None, print_error: bool = True):
             try:
                 return await func(*args, **kwargs)
             except RPCError as e:
-                if 'workflow execution already completed' in str(e).lower():
+                err_msg = str(e).lower()
+                if (
+                    'workflow execution already completed' in err_msg
+                    or 'workflow not found' in err_msg
+                ):
                     if print_error:
                         console.print_error(
-                            'Cannot perform action: Workflow is already completed.'
+                            'Cannot perform action: Workflow is no longer running.'
                         )
                     return return_on_error
                 raise
@@ -82,13 +86,14 @@ class HITLOrchestrator:
             'max_turns': config.max_turns,
         }
 
-        # Start workflow
+        # Start workflow with execution timeout enforced by Temporal server
         handle = await client.start_workflow(
             'HumanInTheLoopWorkflow',
             args=[initial_message, workflow_config],
             id=workflow_id,
             task_queue=config.temporal.queue,
             id_reuse_policy=temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE,
+            execution_timeout=timedelta(seconds=config.workflow_timeout),
         )
 
         console.print_success(f'Workflow started: {workflow_id}')
@@ -120,14 +125,18 @@ class HITLOrchestrator:
 
         return cls(handle, config)
 
-    @handle_rpc_error()
-    async def send_message(self, message: str) -> None:
+    @handle_rpc_error(return_on_error=False)
+    async def send_message(self, message: str) -> bool:
         """Send a message to the agent.
 
         Args:
             message: User message
+
+        Returns:
+            True if sent successfully, False if workflow is no longer running.
         """
         await self.handle.signal('send_message', message)
+        return True
 
     @handle_rpc_error(print_error=False)
     async def end_workflow(self) -> None:
@@ -187,11 +196,12 @@ class HITLOrchestrator:
         """
         return await self.handle.query('get_messages')
 
+    @handle_rpc_error(return_on_error='terminated', print_error=False)
     async def get_status(self) -> str:
         """Get workflow status.
 
         Returns:
-            Status string
+            Status string, or 'terminated' if workflow is no longer running.
         """
         return await self.handle.query('get_status')
 
@@ -506,7 +516,7 @@ class HITLOrchestrator:
                 return '[INTERRUPTIONS]'
 
             # Check status
-            if status in ['completed', 'ended']:
+            if status in ['completed', 'ended', 'timed_out', 'terminated']:
                 return None
 
             # Check timeout
@@ -564,7 +574,10 @@ class HITLOrchestrator:
                     continue
 
                 # Send message to agent
-                await self.send_message(user_input)
+                sent = await self.send_message(user_input)
+                if sent is False:
+                    console.print_warning('Workflow is no longer running. Exiting.')
+                    break
 
                 while True:
                     # Wait for response
@@ -641,7 +654,17 @@ class HITLOrchestrator:
                         elif status == 'ended':
                             console.print_info('\nConversation ended.')
                             break
-                if (await self.get_status()) in ['completed', 'ended']:
+                        elif status in ['timed_out', 'terminated']:
+                            console.print_warning(
+                                '\nWorkflow timed out (execution_timeout reached).'
+                            )
+                            break
+                if (await self.get_status()) in [
+                    'completed',
+                    'ended',
+                    'timed_out',
+                    'terminated',
+                ]:
                     break
 
             except KeyboardInterrupt:
