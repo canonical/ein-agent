@@ -32,5 +32,6 @@ parts:
       scripts/*: app/scripts/
       specs/*: app/specs/
       skills/*: app/skills/
+      prompts/*: app/prompts/
     stage:
       - app
