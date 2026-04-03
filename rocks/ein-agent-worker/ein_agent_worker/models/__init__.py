@@ -14,7 +14,13 @@ from .hitl import (
     WorkflowState,
     WorkflowStatus,
 )
-from .investigation import SharedContext, SharedFinding, SpecialistFinding, SpecialistHandoffReport
+from .investigation import (
+    InvestigationGroup,
+    SharedContext,
+    SharedFinding,
+    SpecialistFinding,
+    SpecialistHandoffReport,
+)
 
 __all__ = [
     'AgentSelectionRequest',
@@ -23,6 +29,7 @@ __all__ = [
     'ChatMessage',
     'DomainType',
     'HITLConfig',
+    'InvestigationGroup',
     'SelectionResponse',
     'SharedContext',
     'SharedFinding',

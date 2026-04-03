@@ -106,7 +106,7 @@ def create_investigation_agent_graph(
     specialists: dict[DomainType, Agent] = {}
     for domain in DomainType:
         # Shared context tools for this specialist
-        sc_update, sc_get, sc_print, sc_group = create_shared_context_tools(
+        sc_update, sc_get, sc_print, sc_group, sc_compact = create_shared_context_tools(
             shared_context, agent_name=DOMAIN_NAMES[domain]
         )
 
@@ -133,6 +133,7 @@ def create_investigation_agent_graph(
                 sc_get,
                 sc_print,
                 sc_group,
+                sc_compact,
                 *domain_utcp_tools,
                 *skill_tools,
             ],
@@ -142,7 +143,7 @@ def create_investigation_agent_graph(
         )
 
     # --- Investigation Agent (coordinator) ---
-    inv_update, inv_get, inv_print, inv_group = create_shared_context_tools(
+    inv_update, inv_get, inv_print, inv_group, inv_compact = create_shared_context_tools(
         shared_context, agent_name='InvestigationAgent'
     )
     investigation_agent = Agent(
@@ -161,12 +162,16 @@ def create_investigation_agent_graph(
             inv_get,
             inv_update,
             inv_group,
+            inv_compact,
         ],
         handoffs=list(specialists.values()),
     )
 
     # --- Context Agent (quick info retrieval) ---
     all_utcp_tools = [t for tools in utcp_tools.values() for t in tools]
+    ctx_update, ctx_get, _ctx_print, _ctx_group, _ctx_compact = create_shared_context_tools(
+        shared_context, agent_name='ContextAgent'
+    )
     context_agent = Agent(
         name='ContextAgent',
         model=model,
@@ -175,13 +180,17 @@ def create_investigation_agent_graph(
         ),
         handoff_description='Quickly retrieve infrastructure information using '
         'UTCP tools. For simple queries like listing pods, checking health, etc.',
-        tools=[*all_utcp_tools, *skill_tools],
+        tools=[*all_utcp_tools, *skill_tools, ctx_update, ctx_get],
     )
 
     # --- Planning Agent (entry point) ---
-    _planner_update, planner_get, planner_print, _planner_group = create_shared_context_tools(
-        shared_context, agent_name='PlanningAgent'
-    )
+    (
+        _planner_update,
+        planner_get,
+        planner_print,
+        _planner_group,
+        _planner_compact,
+    ) = create_shared_context_tools(shared_context, agent_name='PlanningAgent')
     planning_agent = Agent(
         name='PlanningAgent',
         model=model,
@@ -253,14 +262,8 @@ def _create_specialist_handoff_callback(
     async def on_specialist_handoff(ctx, report: SpecialistHandoffReport):  # noqa: RUF029
         timestamp = get_timestamp() if get_timestamp else None
         for finding in report.findings:
-            # Skip if an identical finding was already saved via update_shared_context
-            already_exists = any(
-                f.key == finding.key and f.value == finding.value and f.agent_name == agent_name
-                for f in shared_context.findings
-            )
-            if already_exists:
-                continue
-
+            # add_finding handles semantic dedup: same key + higher confidence
+            # updates in place, same key + equal/lower confidence is skipped.
             shared_context.add_finding(
                 key=finding.key,
                 value=finding.value,

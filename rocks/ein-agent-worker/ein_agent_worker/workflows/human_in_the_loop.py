@@ -686,8 +686,8 @@ class HumanInTheLoopWorkflow:
         Args:
             run_summary: Text summary of tool calls and results from the interrupted run
         """
-        update_tool, get_tool, _print_tool, _group_tool = create_shared_context_tools(
-            self._shared_context, agent_name='CheckpointSummarizer'
+        update_tool, get_tool, _print_tool, _group_tool, _compact_tool = (
+            create_shared_context_tools(self._shared_context, agent_name='CheckpointSummarizer')
         )
 
         summarizer = Agent(
