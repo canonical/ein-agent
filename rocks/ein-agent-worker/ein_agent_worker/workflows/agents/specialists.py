@@ -127,10 +127,21 @@ def build_skills_section(
             f'- `{skill.name}` ({skill.domain}): {skill.description}' for skill in available_skills
         )
 
-    lines.append(
-        '\nUse `read_skill(skill_name)` to load the full content of any skill. '
-        'No need to call `list_skills` first -- the available skills are listed above.'
-    )
+    # Separate auto-inject skills from lazy skills
+    auto_inject_skills = [s for s in available_skills if s.auto_inject and s.content]
+    lazy_skills = [s for s in available_skills if not s.auto_inject]
+
+    if lazy_skills:
+        lines.append(
+            '\nUse `read_skill(skill_name)` to load the full content of any skill. '
+            'No need to call `list_skills` first -- the available skills are listed above.'
+        )
+
+    if auto_inject_skills:
+        lines.append('\n---\n## Required Knowledge (auto-loaded)\n')
+        lines.append('The following skill content is pre-loaded. Follow this guidance.\n')
+        lines.extend(skill.content for skill in auto_inject_skills)
+
     return '\n'.join(lines)
 
 

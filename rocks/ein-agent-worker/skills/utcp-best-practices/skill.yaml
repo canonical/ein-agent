@@ -1,0 +1,4 @@
+name: utcp-best-practices
+description: Best practices for using UTCP tools - error handling, permission boundaries, and efficient API usage
+domain: general
+auto_inject: true

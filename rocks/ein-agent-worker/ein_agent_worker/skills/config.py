@@ -18,6 +18,7 @@ class SkillManifest:
     description: str
     domain: str  # Maps to DomainType: compute, storage, network, observability
     content: str  # Full markdown content from content.md
+    auto_inject: bool = False  # If True, content is embedded in system prompt automatically
 
 
 @dataclasses.dataclass
@@ -73,7 +74,12 @@ class SkillsConfig:
                 continue
 
             skills.append(manifest)
-            logger.info('Loaded skill: %s (domain=%s)', manifest.name, manifest.domain)
+            logger.info(
+                'Loaded skill: %s (domain=%s, auto_inject=%s)',
+                manifest.name,
+                manifest.domain,
+                manifest.auto_inject,
+            )
 
         return cls(skills=skills)
 
@@ -121,6 +127,7 @@ def _load_skill(skill_dir: Path, manifest_path: Path) -> SkillManifest | None:
             description=description,
             domain=domain,
             content=content,
+            auto_inject=bool(data.get('auto_inject', False)),
         )
 
     except yaml.YAMLError as e:

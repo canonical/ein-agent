@@ -35,19 +35,20 @@ logger = logging.getLogger(__name__)
 
 
 def get_available_skills_metadata(skill_registry) -> list[SkillInfo]:
-    """Get lightweight metadata for all registered skills.
+    """Get metadata for all registered skills.
 
     Reads from the in-memory skill registry (populated at worker startup),
-    so no filesystem I/O is needed. Converts string domain values to
-    DomainType enums via Pydantic validation.
+    so no filesystem I/O is needed. For auto-inject skills, includes full
+    content so it can be embedded in agent system prompts.
 
     Args:
         skill_registry: The skill registry module (ein_agent_worker.skills.registry)
 
     Returns:
-        List of SkillInfo with name, description, and typed domain
+        List of SkillInfo with name, description, domain, and optionally content
     """
     result = []
+    auto_injected = []
     for name in skill_registry.list_skills():
         manifest = skill_registry.get_skill(name)
         if manifest:
@@ -56,8 +57,18 @@ def get_available_skills_metadata(skill_registry) -> list[SkillInfo]:
                     name=manifest.name,
                     description=manifest.description,
                     domain=manifest.domain,
+                    auto_inject=manifest.auto_inject,
+                    content=manifest.content if manifest.auto_inject else '',
                 )
             )
+            if manifest.auto_inject:
+                auto_injected.append(manifest.name)
+    if auto_injected:
+        logger.info(
+            'Auto-injecting %d skill(s) into system prompt: %s',
+            len(auto_injected),
+            auto_injected,
+        )
     return result
 
 
