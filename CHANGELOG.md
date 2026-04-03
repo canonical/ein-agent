@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.3] - 2026-04-03
+
+### Features
+
+- Add auto-inject skill system for embedding critical knowledge directly in agent prompts
+- Add UTCP best practices skill to prevent agents retrying 403/404 errors indefinitely
+- Enhance specialist workflow with Scope, Correlate, and Validate phases
+
+### Fixes
+
+- Improve worker log format and suppress noisy third-party loggers
+
 ## [0.2.2] - 2026-04-03
 
 ### Features
