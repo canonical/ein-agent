@@ -92,7 +92,7 @@ Once deployed, note the Temporal server address (typically the service IP or hos
 
 ### Pull ROCK Image from GHCR
 
-The worker ROCK image is published to GHCR automatically on pushes to `main` and GitHub releases:
+The worker ROCK image is published to GHCR on GitHub releases (see [How to release](./how-to-release.md)):
 
 ```bash
 docker pull ghcr.io/jneo8/ein-agent-worker:latest
