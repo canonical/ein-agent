@@ -43,6 +43,12 @@ def _build_environment_section(
             f'  - `{skill.name}` ({skill.domain}): {skill.description}'
             for skill in available_skills
         )
+        # Auto-inject skills: embed full content directly in the prompt
+        auto_inject_skills = [s for s in available_skills if s.auto_inject and s.content]
+        if auto_inject_skills:
+            lines.append('\n## Required Knowledge (auto-loaded)\n')
+            lines.append('The following skill content is pre-loaded. Follow this guidance.\n')
+            lines.extend(skill.content for skill in auto_inject_skills)
     else:
         lines.append('No knowledge resources (skills) are available.')
 

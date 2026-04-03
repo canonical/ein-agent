@@ -23,4 +23,12 @@ class SkillInfo(BaseModel):
 
     name: str = Field(..., description='Skill name identifier')
     description: str = Field(default='', description='Human-readable skill description')
-    domain: DomainType = Field(..., description='Domain this skill belongs to')
+    domain: str = Field(
+        ..., description='Domain this skill belongs to (e.g., compute, storage, general)'
+    )
+    auto_inject: bool = Field(
+        default=False, description='If True, full content is embedded in the system prompt'
+    )
+    content: str = Field(
+        default='', description='Full skill content (populated only when auto_inject=True)'
+    )
