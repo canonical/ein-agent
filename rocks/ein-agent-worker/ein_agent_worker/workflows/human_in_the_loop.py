@@ -426,28 +426,17 @@ class HumanInTheLoopWorkflow:
                     findings_after,
                 )
 
-                lines = [
-                    f'Investigation paused (reached {self._config.agent_max_turns} turn limit).'
-                ]
-                if self._shared_context.findings:
-                    lines.append('\nFindings so far:')
-                    lines.append(self._shared_context.format_summary())
-
-                    root_causes = self._shared_context.get_high_confidence_root_causes()
-                    if root_causes:
-                        lines.append('\nSuggested actions:')
-                        for i, f in enumerate(root_causes[:5], 1):
-                            lines.append(f'{i}. Investigate: **{f.key}** — {f.value}')
-                else:
-                    lines.append(
-                        '\nNo findings were saved during this round. '
-                        'The investigation may need more turns to reach actionable results.'
-                    )
+                # Synthesize a user-facing progress report via LLM (Gemini-style
+                # "grace turn") instead of dumping raw shared context findings.
+                checkpoint_report = await self._run_checkpoint_reporter()
+                workflow.logger.info(
+                    'Checkpoint reporter produced %d chars', len(checkpoint_report)
+                )
 
                 self._state.messages.append(
                     ChatMessage(
                         role='assistant',
-                        content='\n'.join(lines),
+                        content=checkpoint_report,
                         timestamp=workflow.now(),
                     )
                 )
@@ -784,6 +773,72 @@ class HumanInTheLoopWorkflow:
             )
         except Exception as e:
             workflow.logger.error(f'Checkpoint summarizer failed: {e}')
+
+    async def _run_checkpoint_reporter(self) -> str:
+        """Synthesize a user-facing progress report from shared context findings.
+
+        Uses an LLM "grace turn" (Gemini-style) to produce a human-readable
+        checkpoint summary instead of dumping raw SharedContext entries.
+
+        Returns:
+            Formatted progress report string for display to the user.
+            Falls back to a minimal message if the reporter fails.
+        """
+        findings_data = self._shared_context.format_summary()
+        if not findings_data or findings_data == 'No findings recorded yet.':
+            return (
+                'Investigation paused — no findings were captured during this round.\n'
+                'The investigation may need more turns to reach actionable results.'
+            )
+
+        # Get the original user request from conversation history
+        user_request = ''
+        for msg in self._state.messages:
+            if msg.role == 'user':
+                user_request = msg.content
+                break
+
+        reporter = Agent(
+            name='CheckpointReporter',
+            model=self._config.model,
+            instructions=(
+                'You produce concise checkpoint reports for infrastructure investigations.\n\n'
+                'Given investigation findings, write a SHORT progress report with these '
+                'sections:\n'
+                '1. **Summary** — One sentence: what was investigated and the overall status.\n'
+                '2. **Key Findings** — Bullet list of the most important discoveries. '
+                'Group related items. Use plain language, not raw identifiers.\n'
+                '3. **Remaining Work** — What has NOT been investigated yet or needs '
+                'deeper analysis. If everything looks covered, say so.\n\n'
+                'Rules:\n'
+                '- Be concise: aim for 10-15 lines total.\n'
+                '- Prioritize actionable findings over routine observations.\n'
+                '- Use markdown formatting (bold for severity, bullets for lists).\n'
+                '- Do NOT include confidence scores, agent names, or internal keys.\n'
+                '- Do NOT add recommendations or next steps — just report what was found.'
+            ),
+            tools=[],
+        )
+
+        reporter_input = (
+            f'## Original Request\n{user_request}\n\n## Investigation Findings\n{findings_data}'
+        )
+
+        try:
+            result = await Runner.run(
+                reporter,
+                input=reporter_input,
+                max_turns=1,
+                run_config=self._run_config,
+            )
+            report = result.final_output
+            if report and report.strip():
+                return report.strip()
+        except Exception as e:
+            workflow.logger.error(f'Checkpoint reporter failed: {e}')
+
+        # Fallback: minimal structured output if reporter fails
+        return 'Investigation paused. Findings so far:\n' + self._shared_context.format_summary()
 
     # =========================================================================
     # Helpers
