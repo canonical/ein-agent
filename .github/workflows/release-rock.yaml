@@ -1,9 +1,6 @@
 name: Publish rock
 
 on:
-  push:
-    branches:
-      - main
   release:
     types: [published]
   workflow_dispatch:
@@ -49,6 +46,16 @@ jobs:
           echo "image-name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Image: ${IMAGE_NAME}, Version: ${VERSION}, Rock: ${ROCK_FILE}"
+
+      - name: Verify tag matches rockcraft version
+        if: github.event_name == 'release'
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION=$(yq '.version' rocks/ein-agent-worker/rockcraft.yaml)
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "::error::Git tag v${TAG} does not match rockcraft.yaml version ${VERSION}"
+            exit 1
+          fi
 
       - name: Log in to GHCR
         uses: docker/login-action@v3

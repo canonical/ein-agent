@@ -1,9 +1,6 @@
 name: Publish snap
 
 on:
-  push:
-    branches:
-      - main
   release:
     types: [published]
   workflow_dispatch:
@@ -25,6 +22,22 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: snap-ein-agent
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install yq
+        run: sudo snap install yq
+
+      - name: Verify tag matches snapcraft version
+        if: github.event_name == 'release'
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          VERSION=$(yq '.version' ein-agent-cli/snap/snapcraft.yaml)
+          if [ "$TAG" != "$VERSION" ]; then
+            echo "::error::Git tag v${TAG} does not match snapcraft.yaml version ${VERSION}"
+            exit 1
+          fi
 
       - name: Find the downloaded snap file
         run: echo "SNAP_FILE=$(find . -name '*.snap')" >> $GITHUB_ENV
