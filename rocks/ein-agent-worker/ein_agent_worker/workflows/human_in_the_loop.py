@@ -433,30 +433,64 @@ class HumanInTheLoopWorkflow:
                     lines.append('\nFindings so far:')
                     lines.append(self._shared_context.format_summary())
 
-                    # Add suggestions based on high-confidence findings
                     root_causes = self._shared_context.get_high_confidence_root_causes()
                     if root_causes:
                         lines.append('\nSuggested actions:')
                         for i, f in enumerate(root_causes[:5], 1):
                             lines.append(f'{i}. Investigate: **{f.key}** — {f.value}')
                 else:
-                    # No findings saved — provide a brief status from the run
                     lines.append(
                         '\nNo findings were saved during this round. '
                         'The investigation may need more turns to reach actionable results.'
                     )
 
-                lines.append(
-                    '\nWould you like to:\n'
-                    '1. **Continue** the investigation\n'
-                    '2. **Adjust** the plan based on findings\n'
-                    '3. **Stop** here and get the full findings report'
-                )
-
                 self._state.messages.append(
                     ChatMessage(
                         role='assistant',
                         content='\n'.join(lines),
+                        timestamp=workflow.now(),
+                    )
+                )
+
+                # Present checkpoint options via ask_selection (not plain text)
+                checkpoint_interruption = WorkflowInterruption(
+                    id=f'checkpoint:turn{turn_count}',
+                    type='user_selection',
+                    agent_name='Workflow',
+                    question='How would you like to proceed?',
+                    options=[
+                        'Continue the investigation',
+                        'Stop here and get the findings report',
+                    ],
+                    timestamp=workflow.now(),
+                )
+                self._state.interruptions.append(checkpoint_interruption)
+                checkpoint_event = await self._wait_for_event_type(
+                    WorkflowEventType.SELECTION_RESPONSE
+                )
+                self._state.interruptions = []
+
+                if self._should_end or checkpoint_event.type == WorkflowEventType.STOP:
+                    break
+
+                selected = checkpoint_event.payload
+                user_instruction_prefix = '[USER_INSTRUCTION] '
+                if isinstance(selected, str) and selected.startswith(user_instruction_prefix):
+                    content = selected[len(user_instruction_prefix) :]
+                elif selected and 'Stop' in str(selected):
+                    content = 'Please generate the full findings report.'
+                else:
+                    content = 'Continue the investigation from where it paused.'
+
+                # Inject as both a message (for history) and an event (to
+                # unblock the main loop which waits for MESSAGE events).
+                self._state.messages.append(
+                    ChatMessage(role='user', content=content, timestamp=workflow.now())
+                )
+                self._event_queue.append(
+                    WorkflowEvent(
+                        type=WorkflowEventType.MESSAGE,
+                        payload=content,
                         timestamp=workflow.now(),
                     )
                 )

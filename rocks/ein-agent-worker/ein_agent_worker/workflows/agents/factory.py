@@ -1,8 +1,7 @@
 """Agent factory - creates the multi-agent investigation graph.
 
 Constructs the full agent hierarchy:
-  PlanningAgent (entry point)
-    -> ContextAgent (quick queries, all UTCP tools)
+  OrchestratorAgent (entry point, all UTCP tools)
     -> InvestigationAgent (coordinator)
        -> ComputeSpecialist
        -> StorageSpecialist
@@ -20,9 +19,8 @@ from ein_agent_worker.models.domain import DomainType, SkillInfo
 from ein_agent_worker.models.investigation import SharedContext, SpecialistHandoffReport
 from ein_agent_worker.utcp import registry as utcp_registry
 from ein_agent_worker.workflows.agents.instructions import (
-    format_context_instructions,
     format_investigation_instructions,
-    format_planning_instructions,
+    format_orchestrator_instructions,
 )
 from ein_agent_worker.workflows.agents.shared_context_tools import (
     create_shared_context_tools,
@@ -86,7 +84,7 @@ def create_investigation_agent_graph(
         available_skills: Metadata for all registered skills
 
     Returns:
-        The PlanningAgent (entry point of the agent graph)
+        The OrchestratorAgent (entry point of the agent graph)
     """
     available_services = list(utcp_tools.keys())
     logger.info(
@@ -167,48 +165,31 @@ def create_investigation_agent_graph(
         handoffs=list(specialists.values()),
     )
 
-    # --- Context Agent (quick info retrieval) ---
+    # --- Orchestrator Agent (entry point, all tools) ---
     all_utcp_tools = [t for tools in utcp_tools.values() for t in tools]
-    ctx_update, ctx_get, _ctx_print, _ctx_group, _ctx_compact = create_shared_context_tools(
-        shared_context, agent_name='ContextAgent'
+    orch_update, orch_get, orch_print, orch_group, orch_compact = create_shared_context_tools(
+        shared_context, agent_name='OrchestratorAgent'
     )
-    context_agent = Agent(
-        name='ContextAgent',
+    orchestrator_agent = Agent(
+        name='OrchestratorAgent',
         model=model,
-        instructions=format_context_instructions(
-            available_services, available_skills, instance_names=all_instance_names
-        ),
-        handoff_description='Quickly retrieve infrastructure information using '
-        'UTCP tools. For simple queries like listing pods, checking health, etc.',
-        tools=[*all_utcp_tools, *skill_tools, ctx_update, ctx_get],
-    )
-
-    # --- Planning Agent (entry point) ---
-    (
-        _planner_update,
-        planner_get,
-        planner_print,
-        _planner_group,
-        _planner_compact,
-    ) = create_shared_context_tools(shared_context, agent_name='PlanningAgent')
-    planning_agent = Agent(
-        name='PlanningAgent',
-        model=model,
-        instructions=format_planning_instructions(
+        instructions=format_orchestrator_instructions(
             available_services, available_skills, instance_names=all_instance_names
         ),
         tools=[
             ask_user_tool,
             ask_selection_tool,
             fetch_alerts_tool,
-            planner_get,
-            planner_print,
+            *all_utcp_tools,
+            *skill_tools,
+            orch_update,
+            orch_get,
+            orch_print,
+            orch_group,
+            orch_compact,
         ],
-        handoffs=[context_agent, investigation_agent],
+        handoffs=[investigation_agent],
     )
-
-    # --- Wire back-handoffs ---
-    context_agent.handoffs = [planning_agent]
 
     # Specialists use structured handoffs: the SDK forces structured findings
     # output and the on_handoff callback auto-persists to SharedContext.
@@ -230,14 +211,14 @@ def create_investigation_agent_graph(
 
     investigation_agent.handoffs = [
         *specialists.values(),
-        planning_agent,
+        orchestrator_agent,
     ]
 
     logger.info(
-        'Agent graph created: PlanningAgent -> [ContextAgent, InvestigationAgent -> %d specs]',
+        'Agent graph created: OrchestratorAgent -> [InvestigationAgent -> %d specs]',
         len(specialists),
     )
-    return planning_agent
+    return orchestrator_agent
 
 
 def _create_specialist_handoff_callback(

@@ -1,8 +1,8 @@
 """Instruction templates and section builders for non-specialist agents.
 
-Contains the Planning Agent, Context Agent, and Investigation Agent instruction
-templates. These are formatted at agent creation time with environment-aware
-information (available services, skills, specialist capabilities).
+Contains the Orchestrator Agent and Investigation Agent instruction templates.
+These are formatted at agent creation time with environment-aware information
+(available services, skills, specialist capabilities).
 
 Specialist templates live in specialists.py (tightly coupled to domain logic).
 """
@@ -12,8 +12,6 @@ from ein_agent_worker.workflows.agents.prompt_loader import load_template
 from ein_agent_worker.workflows.agents.specialists import (
     DOMAIN_NAMES,
     DOMAIN_UTCP_SERVICE_TYPES,
-    build_services_section,
-    build_skills_section,
 )
 
 # =============================================================================
@@ -95,30 +93,16 @@ def _build_specialists_status_section(
 # =============================================================================
 
 
-def format_planning_instructions(
+def format_orchestrator_instructions(
     utcp_services: list[str],
     available_skills: list[SkillInfo],
     instance_names: dict[str, list[str]] | None = None,
 ) -> str:
-    """Format planning agent instructions with environment context."""
-    return load_template('planning_agent').substitute(
+    """Format orchestrator agent instructions with environment context."""
+    return load_template('orchestrator_agent').substitute(
         environment_section=_build_environment_section(
             utcp_services, available_skills, instance_names=instance_names
         ),
-    )
-
-
-def format_context_instructions(
-    available_services: list[str],
-    available_skills: list[SkillInfo],
-    instance_names: dict[str, list[str]] | None = None,
-) -> str:
-    """Format context agent instructions with available services and skills."""
-    return load_template('context_agent').substitute(
-        available_services_section=build_services_section(
-            available_services, instance_names=instance_names
-        ),
-        available_skills_section=build_skills_section(available_skills, domain=''),
     )
 
 

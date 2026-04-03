@@ -493,6 +493,23 @@ class HITLOrchestrator:
             current_count = state.get('message_count', 0)
             offset = state.get('messages_offset', 0)
 
+            # Check for interruptions FIRST — they take priority.
+            # If there are also new messages, print them before returning
+            # so the user sees context before the selection dialog.
+            interruptions = state.get('interruptions', [])
+            if interruptions:
+                if current_count > self._last_message_count:
+                    for i, msg in enumerate(messages):
+                        abs_index = offset + i
+                        if abs_index < self._last_message_count:
+                            continue
+                        if msg.get('role') == 'assistant':
+                            console.print_message(
+                                f'\n[bold cyan]Agent:[/bold cyan] {msg.get("content", "")}\n'
+                            )
+                    self._last_message_count = current_count
+                return '[INTERRUPTIONS]'
+
             # Check for new messages using absolute indices
             if current_count > self._last_message_count:
                 for i, msg in enumerate(messages):
@@ -519,11 +536,6 @@ class HITLOrchestrator:
 
             if state.get('pending_handoff'):
                 return '[HANDOFF]'
-
-            # Check for interruptions (tool approvals, etc.)
-            interruptions = state.get('interruptions', [])
-            if interruptions:
-                return '[INTERRUPTIONS]'
 
             # Check status
             if status in ['completed', 'ended', 'timed_out', 'terminated']:
