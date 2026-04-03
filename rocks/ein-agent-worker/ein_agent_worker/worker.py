@@ -24,7 +24,15 @@ from ein_agent_worker.utcp.loader import ToolLoader
 from ein_agent_worker.utcp.temporal_utcp import get_utcp_activities
 from ein_agent_worker.workflows.human_in_the_loop import HumanInTheLoopWorkflow
 
-logging.basicConfig(level=logging.INFO)
+LOG_FORMAT = '%(asctime)s [%(levelname)s] %(name)s - %(message)s'
+logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
+
+# Suppress noisy third-party loggers
+logging.getLogger('LiteLLM').setLevel(logging.WARNING)
+logging.getLogger('litellm').setLevel(logging.WARNING)
+logging.getLogger('httpx').setLevel(logging.WARNING)
+logging.getLogger('httpcore').setLevel(logging.WARNING)
+
 logger = logging.getLogger(__name__)
 
 
