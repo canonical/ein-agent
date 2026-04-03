@@ -19,7 +19,7 @@ from ein_agent_worker.models import SharedContext
 
 def create_shared_context_tools(
     shared_context: SharedContext, agent_name: str
-) -> tuple[Callable, Callable, Callable, Callable]:
+) -> tuple[Callable, Callable, Callable, Callable, Callable]:
     """Create shared context tools bound to a specific context and agent.
 
     Args:
@@ -28,7 +28,7 @@ def create_shared_context_tools(
 
     Returns:
         Tuple of (update_shared_context, get_shared_context,
-        print_findings_report, group_findings) function tools
+        print_findings_report, group_findings, compact_findings) function tools
     """
 
     @function_tool
@@ -57,7 +57,8 @@ def create_shared_context_tools(
             f'key={key}, value={value}, confidence={confidence}'
         )
 
-        shared_context.add_finding(
+        count_before = len(shared_context.findings)
+        finding = shared_context.add_finding(
             key=key,
             value=value,
             confidence=confidence,
@@ -65,9 +66,21 @@ def create_shared_context_tools(
             timestamp=workflow.now(),
         )
 
-        workflow.logger.info(f'[Tool Result] update_shared_context: Finding recorded for {key}')
+        if len(shared_context.findings) == count_before:
+            action = (
+                'Updated' if finding.confidence == confidence else 'Skipped (lower confidence)'
+            )
+        else:
+            action = 'Recorded'
 
-        return f'Finding recorded: [{agent_name}] {key}: {value} (confidence: {confidence:.2f})'
+        workflow.logger.info(
+            f'[Tool Result] update_shared_context: {action} finding #{finding.id} for {key}'
+        )
+
+        return (
+            f'Finding {action}: [#{finding.id}] [{finding.agent_name}] {key}: '
+            f'{finding.value} (confidence: {finding.confidence:.2f})'
+        )
 
     @function_tool
     async def get_shared_context(filter_key: str | None = None) -> str:  # noqa: RUF029
@@ -110,20 +123,22 @@ def create_shared_context_tools(
         if high_conf:
             lines.append('\n** HIGH CONFIDENCE (likely root causes) **')
             lines.extend(
-                f'  - [{f.agent_name}] {f.key}: {f.value} ({f.confidence:.2f})' for f in high_conf
+                f'  - [#{f.id}] [{f.agent_name}] {f.key}: {f.value} ({f.confidence:.2f})'
+                for f in high_conf
             )
 
         if medium_conf:
             lines.append('\n** MEDIUM CONFIDENCE **')
             lines.extend(
-                f'  - [{f.agent_name}] {f.key}: {f.value} ({f.confidence:.2f})'
+                f'  - [#{f.id}] [{f.agent_name}] {f.key}: {f.value} ({f.confidence:.2f})'
                 for f in medium_conf
             )
 
         if low_conf:
             lines.append('\n** LOW CONFIDENCE (observations) **')
             lines.extend(
-                f'  - [{f.agent_name}] {f.key}: {f.value} ({f.confidence:.2f})' for f in low_conf
+                f'  - [#{f.id}] [{f.agent_name}] {f.key}: {f.value} ({f.confidence:.2f})'
+                for f in low_conf
             )
 
         return '\n'.join(lines)
@@ -268,17 +283,16 @@ def create_shared_context_tools(
         return report
 
     @function_tool
-    async def group_findings(name: str, finding_indices: list[int], analysis: str) -> str:  # noqa: RUF029
+    async def group_findings(name: str, finding_ids: list[int], analysis: str) -> str:  # noqa: RUF029
         """Group related findings into a named incident or root cause.
 
         Use this tool to consolidate multiple findings that point to
-        the same underlying issue. Finding indices correspond to the
-        numbers shown in the shared context summary
-        (see get_shared_context).
+        the same underlying issue. Use the finding IDs shown as #N
+        in the shared context summary (see get_shared_context).
 
         Args:
             name: Name of the group/incident (e.g. "Ceph OSD Failure")
-            finding_indices: List of finding indices (1-based) to group.
+            finding_ids: List of finding IDs (shown as #N in shared context).
             analysis: Explanation of how these findings are related
                 and the root cause.
 
@@ -287,39 +301,69 @@ def create_shared_context_tools(
         """
         workflow.logger.info(
             f'[Tool Call] group_findings called by {agent_name}: '
-            f'name={name}, indices={finding_indices}'
+            f'name={name}, finding_ids={finding_ids}'
         )
 
-        # Convert 1-based indices to 0-based
-        indices_0 = [i - 1 for i in finding_indices]
-
-        # Validation
-        valid_indices = []
-        invalid_indices = []
-        for i in indices_0:
-            if 0 <= i < len(shared_context.findings):
-                valid_indices.append(i)
+        valid_ids = []
+        invalid_ids = []
+        for fid in finding_ids:
+            if shared_context.get_finding_by_id(fid) is not None:
+                valid_ids.append(fid)
             else:
-                invalid_indices.append(i + 1)
+                invalid_ids.append(fid)
 
-        if invalid_indices:
-            return (
-                f'Error: Invalid indices {invalid_indices}. '
-                f'Valid range: 1-{len(shared_context.findings)}'
-            )
+        if invalid_ids:
+            all_ids = [f.id for f in shared_context.findings]
+            return f'Error: Invalid finding IDs {invalid_ids}. Valid IDs: {all_ids}'
 
-        if not valid_indices:
+        if not valid_ids:
             return 'Error: No valid findings selected.'
 
         shared_context.add_group(
             name=name,
-            finding_indices=valid_indices,
+            finding_ids=valid_ids,
             analysis=analysis,
             agent_name=agent_name,
             timestamp=workflow.now(),
         )
 
         workflow.logger.info(f"[Tool Result] Created group '{name}'")
-        return f"Created group '{name}' with {len(valid_indices)} findings."
+        return f"Created group '{name}' with {len(valid_ids)} findings."
 
-    return update_shared_context, get_shared_context, print_findings_report, group_findings
+    @function_tool
+    async def compact_findings(min_confidence: float = 0.3) -> str:  # noqa: RUF029
+        """Compact the findings list by removing low-confidence entries.
+
+        Use this at investigation checkpoints to keep the shared context
+        lean and focused. Removes findings below the confidence threshold
+        and cleans up any groups that reference removed findings.
+
+        Args:
+            min_confidence: Drop findings below this confidence (default 0.3)
+
+        Returns:
+            Summary of what was compacted
+        """
+        workflow.logger.info(
+            f'[Tool Call] compact_findings called by {agent_name}: min_confidence={min_confidence}'
+        )
+
+        result = shared_context.compact(min_confidence=min_confidence)
+
+        workflow.logger.info(
+            f'[Tool Result] compact_findings: dropped={result["dropped"]}, '
+            f'remaining={result["remaining"]}'
+        )
+
+        return (
+            f'Compacted findings: dropped {result["dropped"]}, '
+            f'{result["remaining"]} remaining (threshold: {min_confidence:.2f})'
+        )
+
+    return (
+        update_shared_context,
+        get_shared_context,
+        print_findings_report,
+        group_findings,
+        compact_findings,
+    )

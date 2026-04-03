@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.2.2] - 2026-04-03
+
+### Features
+
+- Add configurable workflow execution timeout via Temporal
+- Enforce structured handoff reports for specialist agents
+- Add adaptive complexity tiers to investigation planning
+- Improve shared context robustness with semantic dedup, stable IDs, and compaction
+- Add lightweight poll query and auto-approve quick check investigations
+- Replace hardcoded checkpoint messages with LLM-powered progress reporter (Gemini-style "grace turn")
+
+### Fixes
+
+- Truncate large UTCP tool results to prevent Temporal payload overflow (100KB default limit)
+  - Smart truncation for Kubernetes-style list responses with item count metadata
+  - Hard truncation with warning for other large results
+
+### Refactoring
+
+- Extract agent prompts to external markdown files and add output style constraints
+- Merge PlanningAgent + ContextAgent into single OrchestratorAgent with direct UTCP tool access
+
 ## [0.2.1] - 2026-04-01
 
 ### Features

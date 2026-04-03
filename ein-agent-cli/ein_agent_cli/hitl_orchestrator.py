@@ -3,7 +3,7 @@
 import asyncio
 import functools
 import readline  # noqa: F401
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 import temporalio.common
@@ -16,7 +16,7 @@ from ein_agent_cli.models import HITLWorkflowConfig
 
 
 def handle_rpc_error(return_on_error: Any = None, print_error: bool = True):
-    """Decorator to handle RPC errors (specifically workflow completion)."""
+    """Decorator to handle RPC errors (specifically workflow completion/termination)."""
 
     def decorator(func):
         @functools.wraps(func)
@@ -24,10 +24,14 @@ def handle_rpc_error(return_on_error: Any = None, print_error: bool = True):
             try:
                 return await func(*args, **kwargs)
             except RPCError as e:
-                if 'workflow execution already completed' in str(e).lower():
+                err_msg = str(e).lower()
+                if (
+                    'workflow execution already completed' in err_msg
+                    or 'workflow not found' in err_msg
+                ):
                     if print_error:
                         console.print_error(
-                            'Cannot perform action: Workflow is already completed.'
+                            'Cannot perform action: Workflow is no longer running.'
                         )
                     return return_on_error
                 raise
@@ -82,13 +86,14 @@ class HITLOrchestrator:
             'max_turns': config.max_turns,
         }
 
-        # Start workflow
+        # Start workflow with execution timeout enforced by Temporal server
         handle = await client.start_workflow(
             'HumanInTheLoopWorkflow',
             args=[initial_message, workflow_config],
             id=workflow_id,
             task_queue=config.temporal.queue,
             id_reuse_policy=temporalio.common.WorkflowIDReusePolicy.ALLOW_DUPLICATE,
+            execution_timeout=timedelta(seconds=config.workflow_timeout),
         )
 
         console.print_success(f'Workflow started: {workflow_id}')
@@ -120,14 +125,18 @@ class HITLOrchestrator:
 
         return cls(handle, config)
 
-    @handle_rpc_error()
-    async def send_message(self, message: str) -> None:
+    @handle_rpc_error(return_on_error=False)
+    async def send_message(self, message: str) -> bool:
         """Send a message to the agent.
 
         Args:
             message: User message
+
+        Returns:
+            True if sent successfully, False if workflow is no longer running.
         """
         await self.handle.signal('send_message', message)
+        return True
 
     @handle_rpc_error(print_error=False)
     async def end_workflow(self) -> None:
@@ -179,6 +188,15 @@ class HITLOrchestrator:
         """
         return await self.handle.query('get_state')
 
+    @handle_rpc_error(return_on_error={'status': 'completed'}, print_error=False)
+    async def get_poll_state(self) -> dict[str, Any]:
+        """Get lightweight state for polling.
+
+        Returns only recent messages and pending fields to avoid
+        exceeding Temporal's payload size limits.
+        """
+        return await self.handle.query('get_poll_state')
+
     async def get_messages(self) -> list[dict[str, Any]]:
         """Get conversation history.
 
@@ -187,11 +205,12 @@ class HITLOrchestrator:
         """
         return await self.handle.query('get_messages')
 
+    @handle_rpc_error(return_on_error='terminated', print_error=False)
     async def get_status(self) -> str:
         """Get workflow status.
 
         Returns:
-            Status string
+            Status string, or 'terminated' if workflow is no longer running.
         """
         return await self.handle.query('get_status')
 
@@ -464,23 +483,41 @@ class HITLOrchestrator:
         start_time = asyncio.get_event_loop().time()
 
         while True:
-            # Get full state to check messages, status, and pending questions
-            state = await self.get_state()
+            # Use lightweight poll state to avoid large Temporal payloads
+            state = await self.get_poll_state()
             messages = state.get('messages', [])
             status = state.get('status', 'unknown')
             pending_question = state.get('pending_question')
             pending_tool_call = state.get('pending_tool_call')
 
-            current_count = len(messages)
+            current_count = state.get('message_count', 0)
+            offset = state.get('messages_offset', 0)
 
-            # Check for new messages
+            # Check for interruptions FIRST — they take priority.
+            # If there are also new messages, print them before returning
+            # so the user sees context before the selection dialog.
+            interruptions = state.get('interruptions', [])
+            if interruptions:
+                if current_count > self._last_message_count:
+                    for i, msg in enumerate(messages):
+                        abs_index = offset + i
+                        if abs_index < self._last_message_count:
+                            continue
+                        if msg.get('role') == 'assistant':
+                            console.print_message(
+                                f'\n[bold cyan]Agent:[/bold cyan] {msg.get("content", "")}\n'
+                            )
+                    self._last_message_count = current_count
+                return '[INTERRUPTIONS]'
+
+            # Check for new messages using absolute indices
             if current_count > self._last_message_count:
-                # Iterate through new messages
-                for i in range(self._last_message_count, current_count):
-                    msg = messages[i]
+                for i, msg in enumerate(messages):
+                    abs_index = offset + i
+                    if abs_index < self._last_message_count:
+                        continue
                     if msg.get('role') == 'assistant':
-                        # Update counter to next message and return
-                        self._last_message_count = i + 1
+                        self._last_message_count = abs_index + 1
                         return msg.get('content', '')
 
                 # No assistant messages found in new batch
@@ -500,13 +537,8 @@ class HITLOrchestrator:
             if state.get('pending_handoff'):
                 return '[HANDOFF]'
 
-            # Check for interruptions (tool approvals, etc.)
-            interruptions = state.get('interruptions', [])
-            if interruptions:
-                return '[INTERRUPTIONS]'
-
             # Check status
-            if status in ['completed', 'ended']:
+            if status in ['completed', 'ended', 'timed_out', 'terminated']:
                 return None
 
             # Check timeout
@@ -564,7 +596,10 @@ class HITLOrchestrator:
                     continue
 
                 # Send message to agent
-                await self.send_message(user_input)
+                sent = await self.send_message(user_input)
+                if sent is False:
+                    console.print_warning('Workflow is no longer running. Exiting.')
+                    break
 
                 while True:
                     # Wait for response
@@ -572,7 +607,7 @@ class HITLOrchestrator:
                     response = await self.wait_for_response()
 
                     if response == '[TOOL_CALL]':
-                        state = await self.get_state()
+                        state = await self.get_poll_state()
                         tool_call = state.get('pending_tool_call')
                         if tool_call:
                             console.print_panel(
@@ -585,7 +620,7 @@ class HITLOrchestrator:
                             continue
 
                     if response == '[AGENT_SELECTION]':
-                        state = await self.get_state()
+                        state = await self.get_poll_state()
                         selection = state.get('pending_agent_selection')
                         if selection:
                             selected = await self._handle_agent_selection(selection)
@@ -593,7 +628,7 @@ class HITLOrchestrator:
                             continue
 
                     if response == '[HANDOFF]':
-                        state = await self.get_state()
+                        state = await self.get_poll_state()
                         handoff = state.get('pending_handoff')
                         if handoff:
                             msg = (
@@ -612,7 +647,7 @@ class HITLOrchestrator:
                             continue
 
                     if response == '[INTERRUPTIONS]':
-                        state = await self.get_state()
+                        state = await self.get_poll_state()
                         interruptions = state.get('interruptions', [])
                         if interruptions:
                             # Dispatch based on interruption type
@@ -641,7 +676,17 @@ class HITLOrchestrator:
                         elif status == 'ended':
                             console.print_info('\nConversation ended.')
                             break
-                if (await self.get_status()) in ['completed', 'ended']:
+                        elif status in ['timed_out', 'terminated']:
+                            console.print_warning(
+                                '\nWorkflow timed out (execution_timeout reached).'
+                            )
+                            break
+                if (await self.get_status()) in [
+                    'completed',
+                    'ended',
+                    'timed_out',
+                    'terminated',
+                ]:
                     break
 
             except KeyboardInterrupt:

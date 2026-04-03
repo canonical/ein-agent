@@ -21,6 +21,40 @@ class TestSerializeResult:
     def test_non_json_type(self):
         assert serialize_result(42) == '42'
 
+    def test_small_result_not_truncated(self):
+        data = {'items': [{'name': f'pod-{i}'} for i in range(5)]}
+        result = serialize_result(data, max_chars=100_000)
+        parsed = json.loads(result)
+        assert len(parsed['items']) == 5
+        assert '_truncated' not in parsed
+
+    def test_k8s_list_truncated_with_summary(self):
+        """Kubernetes-style list responses are smartly truncated."""
+        items = [{'name': f'pod-{i}', 'status': 'Running', 'data': 'x' * 500} for i in range(100)]
+        data = {'kind': 'PodList', 'apiVersion': 'v1', 'items': items}
+        result = serialize_result(data, max_chars=5000)
+        parsed = json.loads(result)
+        assert '_truncated' in parsed
+        assert parsed['_truncated']['total'] == 100
+        assert parsed['_truncated']['shown'] < 100
+        assert len(parsed['items']) == parsed['_truncated']['shown']
+        assert len(result) <= 5000
+
+    def test_non_list_large_result_hard_truncated(self):
+        """Non-list large results are hard-truncated with a warning."""
+        data = 'x' * 10_000
+        result = serialize_result(data, max_chars=1000)
+        assert len(result) <= 1000
+        assert 'TRUNCATED' in result
+
+    def test_truncation_respects_max_chars(self):
+        """Truncated output never exceeds max_chars."""
+        items = [{'name': f'item-{i}', 'payload': 'y' * 1000} for i in range(200)]
+        data = {'items': items}
+        for limit in [2000, 5000, 10_000, 50_000]:
+            result = serialize_result(data, max_chars=limit)
+            assert len(result) <= limit, f'Result {len(result)} exceeded limit {limit}'
+
 
 class TestSerializeSchema:
     def test_dict_input(self):

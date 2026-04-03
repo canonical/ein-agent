@@ -85,6 +85,12 @@ def investigate(
         '--max-turns',
         help='Maximum agent turns before stopping',
     ),
+    workflow_timeout: int = typer.Option(
+        3600,
+        '--workflow-timeout',
+        help='Global workflow timeout in seconds (default: 3600 = 1 hour). '
+        'Temporal will terminate the workflow when this timeout is reached.',
+    ),
 ):
     """Start an interactive investigation session.
 
@@ -106,6 +112,9 @@ def investigate(
       # Connect to specific Temporal instance
       ein-agent-cli investigate --temporal-host localhost:7233
 
+      # Start with a 30-minute timeout
+      ein-agent-cli investigate --workflow-timeout 1800
+
     Interactive Commands:
       /quit, /exit, /q  - End the conversation
       /status           - Show workflow status
@@ -117,6 +126,7 @@ def investigate(
         temporal_queue=temporal_queue,
         workflow_id=workflow_id,
         max_turns=max_turns,
+        workflow_timeout=workflow_timeout,
     )
 
     asyncio.run(run_hitl_workflow(config))
