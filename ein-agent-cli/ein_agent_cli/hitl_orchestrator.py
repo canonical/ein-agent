@@ -188,6 +188,15 @@ class HITLOrchestrator:
         """
         return await self.handle.query('get_state')
 
+    @handle_rpc_error(return_on_error={'status': 'completed'}, print_error=False)
+    async def get_poll_state(self) -> dict[str, Any]:
+        """Get lightweight state for polling.
+
+        Returns only recent messages and pending fields to avoid
+        exceeding Temporal's payload size limits.
+        """
+        return await self.handle.query('get_poll_state')
+
     async def get_messages(self) -> list[dict[str, Any]]:
         """Get conversation history.
 
@@ -474,23 +483,24 @@ class HITLOrchestrator:
         start_time = asyncio.get_event_loop().time()
 
         while True:
-            # Get full state to check messages, status, and pending questions
-            state = await self.get_state()
+            # Use lightweight poll state to avoid large Temporal payloads
+            state = await self.get_poll_state()
             messages = state.get('messages', [])
             status = state.get('status', 'unknown')
             pending_question = state.get('pending_question')
             pending_tool_call = state.get('pending_tool_call')
 
-            current_count = len(messages)
+            current_count = state.get('message_count', 0)
+            offset = state.get('messages_offset', 0)
 
-            # Check for new messages
+            # Check for new messages using absolute indices
             if current_count > self._last_message_count:
-                # Iterate through new messages
-                for i in range(self._last_message_count, current_count):
-                    msg = messages[i]
+                for i, msg in enumerate(messages):
+                    abs_index = offset + i
+                    if abs_index < self._last_message_count:
+                        continue
                     if msg.get('role') == 'assistant':
-                        # Update counter to next message and return
-                        self._last_message_count = i + 1
+                        self._last_message_count = abs_index + 1
                         return msg.get('content', '')
 
                 # No assistant messages found in new batch
@@ -585,7 +595,7 @@ class HITLOrchestrator:
                     response = await self.wait_for_response()
 
                     if response == '[TOOL_CALL]':
-                        state = await self.get_state()
+                        state = await self.get_poll_state()
                         tool_call = state.get('pending_tool_call')
                         if tool_call:
                             console.print_panel(
@@ -598,7 +608,7 @@ class HITLOrchestrator:
                             continue
 
                     if response == '[AGENT_SELECTION]':
-                        state = await self.get_state()
+                        state = await self.get_poll_state()
                         selection = state.get('pending_agent_selection')
                         if selection:
                             selected = await self._handle_agent_selection(selection)
@@ -606,7 +616,7 @@ class HITLOrchestrator:
                             continue
 
                     if response == '[HANDOFF]':
-                        state = await self.get_state()
+                        state = await self.get_poll_state()
                         handoff = state.get('pending_handoff')
                         if handoff:
                             msg = (
@@ -625,7 +635,7 @@ class HITLOrchestrator:
                             continue
 
                     if response == '[INTERRUPTIONS]':
-                        state = await self.get_state()
+                        state = await self.get_poll_state()
                         interruptions = state.get('interruptions', [])
                         if interruptions:
                             # Dispatch based on interruption type

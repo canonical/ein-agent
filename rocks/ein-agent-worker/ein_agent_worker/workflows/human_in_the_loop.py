@@ -163,6 +163,34 @@ class HumanInTheLoopWorkflow:
         return self._state.model_dump(mode='json')
 
     @workflow.query
+    def get_poll_state(self) -> dict:
+        """Lightweight state for CLI polling.
+
+        Returns only the fields the polling loop needs, excluding large
+        payloads like full message history and fetched alerts to stay
+        well under Temporal's 512KB payload warning threshold.
+        """
+        state_dict = self._state.model_dump(mode='json')
+
+        all_messages = state_dict.get('messages', [])
+        total = len(all_messages)
+        # Return only the tail — enough for new-message detection
+        tail_size = min(4, total)
+        recent = all_messages[total - tail_size :]
+
+        return {
+            'status': state_dict.get('status'),
+            'message_count': total,
+            'messages_offset': total - tail_size,
+            'messages': recent,
+            'interruptions': state_dict.get('interruptions', []),
+            'pending_question': state_dict.get('pending_question'),
+            'pending_tool_call': state_dict.get('pending_tool_call'),
+            'pending_agent_selection': state_dict.get('pending_agent_selection'),
+            'pending_handoff': state_dict.get('pending_handoff'),
+        }
+
+    @workflow.query
     def get_messages(self) -> list[dict]:
         """Get conversation history."""
         return [m.model_dump(mode='json') for m in self._state.messages]
