@@ -12,11 +12,12 @@ Constructs the full agent hierarchy:
 
 import logging
 from collections.abc import Callable
+from datetime import datetime
 
-from agents import Agent
+from agents import Agent, handoff
 
 from ein_agent_worker.models.domain import DomainType, SkillInfo
-from ein_agent_worker.models.investigation import SharedContext
+from ein_agent_worker.models.investigation import SharedContext, SpecialistHandoffReport
 from ein_agent_worker.utcp import registry as utcp_registry
 from ein_agent_worker.workflows.agents.instructions import (
     format_context_instructions,
@@ -199,8 +200,25 @@ def create_investigation_agent_graph(
 
     # --- Wire back-handoffs ---
     context_agent.handoffs = [planning_agent]
-    for spec in specialists.values():
-        spec.handoffs = [investigation_agent]
+
+    # Specialists use structured handoffs: the SDK forces structured findings
+    # output and the on_handoff callback auto-persists to SharedContext.
+    for domain, spec in specialists.items():
+        spec.handoffs = [
+            handoff(
+                agent=investigation_agent,
+                input_type=SpecialistHandoffReport,
+                on_handoff=_create_specialist_handoff_callback(
+                    shared_context=shared_context,
+                    agent_name=DOMAIN_NAMES[domain],
+                ),
+                tool_description_override=(
+                    'Hand off back to InvestigationAgent with your structured findings '
+                    'report. You MUST provide all findings from your investigation.'
+                ),
+            )
+        ]
+
     investigation_agent.handoffs = [
         *specialists.values(),
         planning_agent,
@@ -211,6 +229,58 @@ def create_investigation_agent_graph(
         len(specialists),
     )
     return planning_agent
+
+
+def _create_specialist_handoff_callback(
+    shared_context: SharedContext,
+    agent_name: str,
+    get_timestamp: Callable[[], datetime] | None = None,
+):
+    """Create an on_handoff callback that auto-persists specialist findings.
+
+    When a specialist hands off to InvestigationAgent, the SDK validates the
+    structured report and this callback saves all findings to SharedContext.
+    This eliminates the risk of findings being lost when the LLM forgets to
+    call update_shared_context.
+
+    Args:
+        shared_context: The shared context to persist findings to
+        agent_name: Name of the specialist agent
+        get_timestamp: Optional callable to get current timestamp
+            (use workflow.now in Temporal workflows)
+    """
+
+    async def on_specialist_handoff(ctx, report: SpecialistHandoffReport):  # noqa: RUF029
+        timestamp = get_timestamp() if get_timestamp else None
+        for finding in report.findings:
+            # Skip if an identical finding was already saved via update_shared_context
+            already_exists = any(
+                f.key == finding.key and f.value == finding.value and f.agent_name == agent_name
+                for f in shared_context.findings
+            )
+            if already_exists:
+                continue
+
+            shared_context.add_finding(
+                key=finding.key,
+                value=finding.value,
+                confidence=finding.confidence,
+                agent_name=agent_name,
+                metadata={
+                    'domain': report.domain,
+                    'root_cause_identified': report.root_cause_identified,
+                    'source': 'structured_handoff',
+                },
+                timestamp=timestamp,
+            )
+        logger.info(
+            '[Auto-persist] %s handoff: %d findings in report, %d total in context',
+            agent_name,
+            len(report.findings),
+            len(shared_context.findings),
+        )
+
+    return on_specialist_handoff
 
 
 def _get_domain_utcp_tools(domain: DomainType, utcp_tools: dict[str, list]) -> list:

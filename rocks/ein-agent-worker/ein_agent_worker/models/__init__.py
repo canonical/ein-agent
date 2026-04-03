@@ -14,7 +14,7 @@ from .hitl import (
     WorkflowState,
     WorkflowStatus,
 )
-from .investigation import SharedContext, SharedFinding
+from .investigation import SharedContext, SharedFinding, SpecialistFinding, SpecialistHandoffReport
 
 __all__ = [
     'AgentSelectionRequest',
@@ -27,6 +27,8 @@ __all__ = [
     'SharedContext',
     'SharedFinding',
     'SkillInfo',
+    'SpecialistFinding',
+    'SpecialistHandoffReport',
     'WorkflowEvent',
     'WorkflowEventType',
     'WorkflowInterruption',

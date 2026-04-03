@@ -38,6 +38,49 @@ class InvestigationGroup(BaseModel):
     timestamp: datetime | None = Field(default=None, description='When created')
 
 
+class SpecialistFinding(BaseModel):
+    """A single finding for the structured handoff report.
+
+    Used as part of SpecialistHandoffReport to guarantee findings are captured
+    when a specialist hands off to the InvestigationAgent.
+    """
+
+    key: str = Field(
+        ..., description="Resource identifier (e.g., 'node:worker-1', 'osd:osd.5', 'pod:ns/name')"
+    )
+    value: str = Field(..., description='Concise description of the finding')
+    confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description='Certainty: 0.9-1.0 confirmed, 0.7-0.8 likely, 0.5-0.6 possible',
+    )
+
+
+class SpecialistHandoffReport(BaseModel):
+    """Structured report that specialists MUST provide when handing off.
+
+    The SDK validates this schema and the on_handoff callback auto-persists
+    findings to SharedContext, eliminating the risk of lost findings.
+    """
+
+    findings: list[SpecialistFinding] = Field(
+        ..., description='All findings discovered during investigation'
+    )
+    summary: str = Field(..., description='One-paragraph summary of investigation results')
+    domain: str = Field(
+        ..., description='Domain investigated (compute, storage, network, observability)'
+    )
+    resources_checked: list[str] = Field(
+        default_factory=list,
+        description='Resources that were checked (e.g., pod names, node names)',
+    )
+    root_cause_identified: bool = Field(
+        default=False,
+        description='Whether a root cause was identified with high confidence',
+    )
+
+
 class SharedContext(BaseModel):
     """The Blackboard - a shared context for all agents.
 
