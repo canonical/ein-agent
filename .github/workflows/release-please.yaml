@@ -1,0 +1,42 @@
+name: Release Please
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+
+      - name: Append artifact links to release notes
+        if: steps.release.outputs.release_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          REPO="${{ github.repository }}"
+          BODY=$(gh release view "$TAG" --repo "$REPO" --json body -q .body)
+          LINKS=$(cat <<EOF
+
+          ---
+
+          ### Published Artifacts
+
+          - **Rock image**: \`ghcr.io/${{ github.repository_owner }}/ein-agent-worker:${VERSION}\`
+          - **Snap package**: \`snap install ein-agent --channel=latest/edge\`
+          EOF
+          )
+          gh release edit "$TAG" --repo "$REPO" --notes "${BODY}${LINKS}"

@@ -95,9 +95,9 @@ Once deployed, note the Temporal server address (typically the service IP or hos
 The worker ROCK image is published to GHCR on GitHub releases (see [How to release](./how-to-release.md)):
 
 ```bash
-docker pull ghcr.io/jneo8/ein-agent-worker:latest
+docker pull ghcr.io/canonical/ein-agent-worker:latest
 # or a specific version
-docker pull ghcr.io/jneo8/ein-agent-worker:0.1.0
+docker pull ghcr.io/canonical/ein-agent-worker:0.1.0
 ```
 
 For local builds (optional, e.g. for development):
@@ -280,7 +280,7 @@ Deploy the worker with your ROCK image:
 ```bash
 juju deploy temporal-worker-k8s ein-agent-worker -m temporal \
   --channel stable \
-  --resource temporal-worker-image=ghcr.io/jneo8/ein-agent-worker:0.1.0 \
+  --resource temporal-worker-image=ghcr.io/canonical/ein-agent-worker:0.1.0 \
   --config host="temporal-k8s.temporal.svc.cluster.local:7233" \
   --config namespace=default \
   --config queue=ein-agent-queue \
