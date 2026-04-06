@@ -23,9 +23,26 @@ jobs:
     with:
       component: ein-agent-cli
 
+  unit-test:
+    name: Unit tests
+    needs: fast-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Run unit tests
+        working-directory: ein-agent-cli
+        run: uv run --group test pytest tests/
+
   build:
     name: Build snap
-    needs: fast-lint
+    needs: unit-test
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     outputs:

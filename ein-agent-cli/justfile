@@ -19,6 +19,10 @@ fast-lint path='.':
     : "$FAILURES command(s) failed."
     exit $FAILURES
 
+[doc('Run unit tests.')]
+unit-test *args='':
+    uv run --group test pytest tests/ {{args}}
+
 [doc('Run `ruff check --fix` and `ruff format`, modifying files in place.')]
 format package='.':
     uv run --only-group=fast-lint ruff format --preview '{{package}}'

@@ -26,6 +26,9 @@ packages = ["ein_agent_cli"]
 fast-lint = [
     "ruff==0.11.0",
 ]
+test = [
+    "pytest>=9.0.2",
+]
 
 # Linting tools configuration
 [tool.ruff]
