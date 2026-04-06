@@ -6,16 +6,8 @@
   "packages": {
     ".": {
       "extra-files": [
-        {
-          "type": "yaml",
-          "path": "rocks/ein-agent-worker/rockcraft.yaml",
-          "jsonpath": "$.version"
-        },
-        {
-          "type": "yaml",
-          "path": "ein-agent-cli/snap/snapcraft.yaml",
-          "jsonpath": "$.version"
-        }
+        "rocks/ein-agent-worker/rockcraft.yaml",
+        "ein-agent-cli/snap/snapcraft.yaml"
       ]
     }
   },
