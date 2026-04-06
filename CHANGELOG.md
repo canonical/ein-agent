@@ -1,5 +1,30 @@
 # Changelog
 
+## [0.3.0](https://github.com/canonical/ein-agent/compare/v0.2.3...v0.3.0) (2026-04-06)
+
+
+### Features
+
+* add safety awareness prompts to all agent instructions ([#13](https://github.com/canonical/ein-agent/issues/13)) ([cfa6995](https://github.com/canonical/ein-agent/commit/cfa6995228a4ecce2b8a11271479c7a18e6ceb71))
+* add safety prompts and unit test CI jobs ([cfa6995](https://github.com/canonical/ein-agent/commit/cfa6995228a4ecce2b8a11271479c7a18e6ceb71))
+
+
+### Bug Fixes
+
+* bootstrap release-please with packages config and last-release-sha ([#14](https://github.com/canonical/ein-agent/issues/14)) ([85a3953](https://github.com/canonical/ein-agent/commit/85a3953e86f72ca0a02b45b5a18d088384953a80))
+* use plain string extra-files to avoid YAML reformatting ([#17](https://github.com/canonical/ein-agent/issues/17)) ([5bb657a](https://github.com/canonical/ein-agent/commit/5bb657a4238bb2dbc162d5a314b1edc7e333864b))
+
+
+### CI/CD
+
+* adopt release-please and enforce conventional commits ([a787678](https://github.com/canonical/ein-agent/commit/a78767826adacd6383794438010edd0cd6932229))
+* adopt release-please and enforce conventional commits ([3d4e129](https://github.com/canonical/ein-agent/commit/3d4e1292ec8ca228e123dcb85087541b7cb9aac6)), closes [#8](https://github.com/canonical/ein-agent/issues/8)
+* fix snap release ([46acb38](https://github.com/canonical/ein-agent/commit/46acb3872b49df92c842517198c0ea98b4f1a5f3))
+* fix snap release ([119b5d4](https://github.com/canonical/ein-agent/commit/119b5d41a49a38c6b6db3a2683bc313cee32d343))
+* replace pull_request_target with pull_request in PR title check ([4ece043](https://github.com/canonical/ein-agent/commit/4ece04320631e6d52c65f7240c45d1db8c732428))
+* replace pull_request_target with pull_request in PR title check ([f3377ff](https://github.com/canonical/ein-agent/commit/f3377ff1c6cc05acf9467f2ecd9b3799fbd287d2))
+* use PAT for release-please to trigger downstream CI ([#16](https://github.com/canonical/ein-agent/issues/16)) ([97ff5a4](https://github.com/canonical/ein-agent/commit/97ff5a438a386ac489a469a2a30eb058348cfa07))
+
 ## [0.2.3] - 2026-04-03
 
 ### Features
