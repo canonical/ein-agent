@@ -37,8 +37,8 @@ jobs:
 
           ### Published Artifacts
 
-          - **Rock image**: \`ghcr.io/${{ github.repository_owner }}/ein-agent-worker:${VERSION}\`
-          - **Snap package**: \`snap install ein-agent --channel=latest/edge\`
+          - **Rock image**: \`ghcr.io/${{ github.repository_owner }}/ein-agent-worker:${VERSION}\` ([GitHub Package](https://github.com/${{ github.repository }}/pkgs/container/ein-agent-worker))
+          - **Snap package**: \`snap install ein-agent --channel=latest/edge\` ([Snap Store](https://snapcraft.io/ein-agent))
           EOF
           )
           gh release edit "$TAG" --repo "$REPO" --notes "${BODY}${LINKS}"
