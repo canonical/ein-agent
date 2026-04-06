@@ -1,6 +1,6 @@
 name: ein-agent
 base: core24
-version: '0.2.3'
+version: 0.3.0
 summary: AI-powered interactive investigation CLI for operations events
 description: |
   Ein Agent CLI is a command-line interface for triggering and managing
@@ -13,20 +13,16 @@ description: |
    * Start a new interactive investigation workflow
    * Connect to an existing workflow by ID
    * Collaborate with AI agents in real-time troubleshooting
-
 license: Apache-2.0
 confinement: strict
-
 platforms:
-  amd64:
-  arm64:
-
+  amd64: null
+  arm64: null
 apps:
   ein-agent:
     command: bin/ein-agent
     plugs:
       - network
-
 parts:
   ein-agent:
     source: .
@@ -40,10 +36,10 @@ parts:
       - cargo
       - rustc
     build-environment:
-      - UV_FROZEN: "true"
-      - UV_COMPILE_BYTECODE: "true"
+      - UV_FROZEN: 'true'
+      - UV_COMPILE_BYTECODE: 'true'
     stage:
-      - -bin/activate*
-      - -bin/deactivate*
-      - -bin/pip*
-      - -bin/pydoc*
+      - '-bin/activate*'
+      - '-bin/deactivate*'
+      - '-bin/pip*'
+      - '-bin/pydoc*'
