@@ -18,11 +18,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Download snap artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: snap-ein-agent
-
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -38,6 +33,11 @@ jobs:
             echo "::error::Git tag v${TAG} does not match snapcraft.yaml version ${VERSION}"
             exit 1
           fi
+
+      - name: Download snap artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: snap-ein-agent
 
       - name: Find the downloaded snap file
         run: echo "SNAP_FILE=$(find . -name '*.snap')" >> $GITHUB_ENV
