@@ -19,6 +19,8 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
+        with:
+          token: ${{ secrets.GH_PAT_TOKEN }}
 
       - name: Append artifact links to release notes
         if: steps.release.outputs.release_created == 'true'
