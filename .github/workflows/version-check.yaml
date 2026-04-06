@@ -7,6 +7,10 @@ on:
     types: [opened, synchronize, reopened]
     branches:
       - main
+    paths:
+      - "ein-agent-cli/snap/snapcraft.yaml"
+      - "rocks/ein-agent-worker/rockcraft.yaml"
+      - ".release-please-manifest.json"
   workflow_call:
   workflow_dispatch:
 
@@ -22,14 +26,27 @@ jobs:
       - name: Install yq
         run: sudo snap install yq
 
+      - name: Install jq
+        run: sudo apt-get install -y jq
+
       - name: Verify versions match
         run: |
           SNAP_VERSION=$(yq '.version' ein-agent-cli/snap/snapcraft.yaml)
           ROCK_VERSION=$(yq '.version' rocks/ein-agent-worker/rockcraft.yaml)
-          echo "snap version: $SNAP_VERSION"
-          echo "rock version: $ROCK_VERSION"
+          MANIFEST_VERSION=$(jq -r '.["."]' .release-please-manifest.json)
+          echo "snap version:     $SNAP_VERSION"
+          echo "rock version:     $ROCK_VERSION"
+          echo "manifest version: $MANIFEST_VERSION"
+          ERRORS=0
           if [ "$SNAP_VERSION" != "$ROCK_VERSION" ]; then
             echo "::error::Version mismatch: snapcraft.yaml=$SNAP_VERSION rockcraft.yaml=$ROCK_VERSION"
+            ERRORS=1
+          fi
+          if [ "$SNAP_VERSION" != "$MANIFEST_VERSION" ]; then
+            echo "::error::Version mismatch: snapcraft.yaml=$SNAP_VERSION .release-please-manifest.json=$MANIFEST_VERSION"
+            ERRORS=1
+          fi
+          if [ "$ERRORS" -ne 0 ]; then
             exit 1
           fi
-          echo "Versions match: $SNAP_VERSION"
+          echo "All versions match: $SNAP_VERSION"

@@ -61,7 +61,7 @@ A command-line interface to trigger and manage workflows. It allows users to:
 A Temporal worker that executes AI-powered workflows. Pre-built ROCK images are available from GHCR:
 
 ```bash
-docker pull ghcr.io/jneo8/ein-agent-worker:latest
+docker pull ghcr.io/canonical/ein-agent-worker:latest
 ```
 
 Built with:

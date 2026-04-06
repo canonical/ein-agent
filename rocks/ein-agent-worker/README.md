@@ -7,8 +7,8 @@ A Temporal worker that executes AI-powered troubleshooting workflows using UTCP 
 Pre-built ROCK images are published to GHCR:
 
 ```bash
-docker pull ghcr.io/jneo8/ein-agent-worker:latest
-docker pull ghcr.io/jneo8/ein-agent-worker:0.1.0
+docker pull ghcr.io/canonical/ein-agent-worker:latest
+docker pull ghcr.io/canonical/ein-agent-worker:0.1.0
 ```
 
 Images are published automatically on pushes to `main` and GitHub releases.
