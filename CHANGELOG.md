@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.1](https://github.com/canonical/ein-agent/compare/v0.3.0...v0.3.1) (2026-04-07)
+
+
+### Documentation
+
+* rewrite harness engineering doc as operations agent design guide ([#21](https://github.com/canonical/ein-agent/issues/21)) ([5f236cc](https://github.com/canonical/ein-agent/commit/5f236cc31e773af5265374e30628a02a75485ac0))
+
+
+### CI/CD
+
+* add GitHub Package and Snap Store links to release notes ([#19](https://github.com/canonical/ein-agent/issues/19)) ([d1012d9](https://github.com/canonical/ein-agent/commit/d1012d953b34c88bfbbe79487da4967de5b18f89))
+
 ## [0.3.0](https://github.com/canonical/ein-agent/compare/v0.2.3...v0.3.0) (2026-04-06)
 
 
